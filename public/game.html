@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>اسم نبات جماد حيوان</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&amp;family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined"
+      rel="stylesheet"
+    />
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+      body {
+        font-family: "Cairo", "Plus Jakarta Sans", sans-serif;
+      }
+      .font-cairo {
+        font-family: "Cairo", sans-serif;
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#00C49A",
+              secondary: "#2C3E50",
+              "accent-yellow": "#FFC107",
+              "accent-coral": "#FF6B6B",
+              "background-light": "#F8F9FA",
+              "background-dark": "#1a2531",
+            },
+            fontFamily: {
+              display: ["Cairo", "Plus Jakarta Sans", "sans-serif"],
+            },
+            borderRadius: {
+              DEFAULT: "1rem",
+              lg: "1.5rem",
+              xl: "2rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+  </head>
+  <body
+    class="bg-background-light dark:bg-background-dark text-secondary dark:text-gray-200 font-cairo"
+    style="direction: rtl"
+  >
+    <div class="relative min-h-screen w-full overflow-hidden">
+      <!-- Abstract Shapes -->
+      <div
+        class="absolute top-[-10%] left-[-10%] w-72 h-72 bg-primary/20 dark:bg-primary/30 rounded-full filter blur-xl opacity-50"
+      ></div>
+      <div
+        class="absolute bottom-[-15%] right-[-15%] w-96 h-96 bg-accent-yellow/20 dark:bg-accent-yellow/30 rounded-full filter blur-2xl opacity-40"
+      ></div>
+      <div
+        class="absolute top-[20%] right-[10%] w-48 h-48 bg-accent-coral/10 dark:bg-accent-coral/20 rounded-full filter blur-lg opacity-60"
+      ></div>
+
+      <div class="relative flex min-h-screen">
+        <!-- Sidebar with Scores -->
+        <aside
+          class="w-72 bg-white/50 dark:bg-secondary/30 backdrop-blur-lg p-6 border-l border-gray-200/50 dark:border-gray-700/50 flex flex-col gap-6"
+        >
+          <h2 class="text-2xl font-bold text-secondary dark:text-white">
+            النتائج
+          </h2>
+          <div id="playersList" class="flex flex-col gap-4">
+            <!-- سيتم ملؤها بـ JavaScript -->
+          </div>
+
+          <div
+            class="mt-auto pt-4 border-t border-gray-200 dark:border-gray-700"
+          >
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">
+              اللاعبون الذين أرسلوا:
+            </p>
+            <p id="submittedCount" class="text-2xl font-bold text-primary">
+              0/0
+            </p>
+          </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 p-8 md:p-12">
+          <div class="max-w-4xl mx-auto flex flex-col items-center">
+            <!-- Top Bar with Game Title -->
+            <header class="w-full flex items-center justify-center mb-8">
+              <div
+                class="flex items-center gap-4 text-secondary dark:text-white"
+              >
+                <div class="size-8 text-primary">
+                  <svg
+                    fill="none"
+                    viewbox="0 0 48 48"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M4 4H17.3334V17.3334H30.6666V30.6666H44V44H4V4Z"
+                      fill="currentColor"
+                    ></path>
+                  </svg>
+                </div>
+                <h2 class="text-3xl font-black leading-tight tracking-tight">
+                  اسم نبات جماد حيوان
+                </h2>
+              </div>
+            </header>
+
+            <!-- Game Info: Letter & Timer -->
+            <div
+              class="flex flex-col md:flex-row items-center justify-center gap-8 w-full mb-8"
+            >
+              <div class="flex flex-col items-center gap-2">
+                <p class="text-gray-500 dark:text-gray-400 font-semibold">
+                  الحرف هو:
+                </p>
+                <div
+                  class="w-40 h-40 bg-white dark:bg-secondary/50 rounded-full shadow-lg flex items-center justify-center border-4 border-secondary dark:border-white"
+                >
+                  <h1
+                    id="currentLetter"
+                    class="text-8xl font-black text-secondary dark:text-white"
+                  >
+                    -
+                  </h1>
+                </div>
+              </div>
+              <div class="flex flex-col items-center gap-2">
+                <p class="text-gray-500 dark:text-gray-400 font-semibold">
+                  الوقت المتبقي:
+                </p>
+                <div
+                  class="flex h-40 w-40 items-center justify-center rounded-full bg-white dark:bg-secondary/50 shadow-lg border-4 border-accent-yellow"
+                >
+                  <span
+                    id="timer"
+                    class="text-5xl font-bold text-secondary dark:text-white"
+                    dir="ltr"
+                    >01:00</span
+                  >
+                </div>
+              </div>
+            </div>
+
+            <p
+              id="roundInfo"
+              class="text-gray-600 dark:text-gray-300 text-lg font-semibold mb-6"
+            >
+              الجولة 1/5
+            </p>
+
+            <!-- Input Grid -->
+            <div
+              class="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-10 text-center"
+            >
+              <div>
+                <label
+                  class="block mb-2 text-lg font-bold text-secondary dark:text-gray-200"
+                  >اسم</label
+                >
+                <input
+                  id="nameInput"
+                  class="w-full p-4 text-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-secondary/30 focus:border-primary focus:ring-primary dark:focus:border-primary text-lg font-semibold"
+                  placeholder="مثال: باسم"
+                  type="text"
+                />
+              </div>
+              <div>
+                <label
+                  class="block mb-2 text-lg font-bold text-secondary dark:text-gray-200"
+                  >نبات</label
+                >
+                <input
+                  id="plantInput"
+                  class="w-full p-4 text-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-secondary/30 focus:border-primary focus:ring-primary dark:focus:border-primary text-lg font-semibold"
+                  placeholder="مثال: برتقال"
+                  type="text"
+                />
+              </div>
+              <div>
+                <label
+                  class="block mb-2 text-lg font-bold text-secondary dark:text-gray-200"
+                  >حيوان</label
+                >
+                <input
+                  id="animalInput"
+                  class="w-full p-4 text-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-secondary/30 focus:border-primary focus:ring-primary dark:focus:border-primary text-lg font-semibold"
+                  placeholder="مثال: بطة"
+                  type="text"
+                />
+              </div>
+              <div>
+                <label
+                  class="block mb-2 text-lg font-bold text-secondary dark:text-gray-200"
+                  >جماد</label
+                >
+                <input
+                  id="thingInput"
+                  class="w-full p-4 text-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-secondary/30 focus:border-primary focus:ring-primary dark:focus:border-primary text-lg font-semibold"
+                  placeholder="مثال: باب"
+                  type="text"
+                />
+              </div>
+              <div>
+                <label
+                  class="block mb-2 text-lg font-bold text-secondary dark:text-gray-200"
+                  >بلاد/مكان</label
+                >
+                <input
+                  id="countryInput"
+                  class="w-full p-4 text-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-secondary/30 focus:border-primary focus:ring-primary dark:focus:border-primary text-lg font-semibold"
+                  placeholder="مثال: بيروت"
+                  type="text"
+                />
+              </div>
+            </div>
+
+            <!-- Submit Button -->
+            <button
+              id="submitBtn"
+              class="w-full max-w-sm py-4 px-8 bg-primary text-white text-2xl font-black rounded-lg shadow-lg hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/50 transition-all duration-300 transform hover:scale-105"
+            >
+              إرسال
+            </button>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="js/game.js"></script>
+  </body>
+</html>

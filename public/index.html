@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html class="light" dir="rtl" lang="ar">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>اسم نبات جماد حيوان</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&amp;family=Cairo:wght@400;700;900&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined"
+      rel="stylesheet"
+    />
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#f4c434",
+              "background-light": "#f8f8f5",
+              "background-dark": "#221e10",
+              "text-light": "#181611",
+              "text-dark": "#f5f3f0",
+              "surface-light": "#f5f3f0",
+              "surface-dark": "#2a2618",
+              "muted-light": "#8a8060",
+              "muted-dark": "#8a8060",
+            },
+            fontFamily: {
+              display: ["Cairo", "Plus Jakarta Sans", "sans-serif"],
+            },
+            borderRadius: {
+              DEFAULT: "1rem",
+              lg: "2rem",
+              xl: "3rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+  </head>
+  <body class="font-display">
+    <div
+      class="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark"
+    >
+      <div class="absolute inset-0 z-0 opacity-30 dark:opacity-20">
+        <div
+          class="absolute -left-40 -top-40 h-96 w-96 rounded-full bg-primary/20 blur-3xl"
+        ></div>
+        <div
+          class="absolute -right-40 -bottom-40 h-96 w-96 rounded-full bg-[#2196F3]/20 blur-3xl"
+        ></div>
+        <div
+          class="absolute bottom-1/4 left-1/3 h-80 w-80 rounded-full bg-[#4CAF50]/10 blur-3xl"
+        ></div>
+      </div>
+      <div class="layout-container flex h-full grow flex-col">
+        <div
+          class="px-4 sm:px-10 md:px-20 lg:px-40 flex flex-1 justify-center py-5"
+        >
+          <div
+            class="layout-content-container flex flex-col max-w-[960px] flex-1 w-full z-10"
+          >
+            <main
+              class="flex-grow flex flex-col items-center justify-center text-center"
+            >
+              <div
+                class="flex w-full grow bg-transparent @container p-4 justify-center items-center"
+              >
+                <div class="w-full max-w-sm flex-col flex items-center gap-4">
+                  <div class="w-48 h-48 mb-8">
+                    <div
+                      class="w-full bg-center bg-no-repeat bg-cover aspect-square rounded-none"
+                      data-alt="Stylized game logo showing the four categories: a plant, a globe, an animal, and a block."
+                      style="
+                        background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDUHahQ2GqSLHKUvs8P9DVeS409n0oGvzWRILhAo1YfTF13XSBPr3oQ6dfKCVYkI8HL-IkGt84wntqqyTCHQ4zRbCakh4iynIOj0lxVeiEud_Z6Px_k7zjD8lPqSz0eb5s-hwaclubbFP06i5i96D__iEj_IAKL2wst6uReMbnBPx1MDoxhWGQJhXa0HI1IXpQVRmhB0keyV32AjtmR02y5h0ZdR3Doy4JBHMoH9Lk9Mj6HIpkJ5IYiGaWDxulSvAbWsyj2l3LxvEU');
+                      "
+                    ></div>
+                  </div>
+                  <h1
+                    class="text-text-light dark:text-text-dark tracking-tight text-4xl sm:text-5xl font-black leading-tight px-4 text-center pb-3 pt-6"
+                  >
+                    اسم نبات جماد حيوان
+                  </h1>
+
+                  <!-- رسالة الخطأ -->
+                  <div
+                    id="errorMessage"
+                    class="hidden w-full max-w-[480px] px-5 py-3 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-lg text-center"
+                  ></div>
+
+                  <div
+                    class="flex flex-1 gap-4 max-w-[480px] flex-col items-stretch px-4 py-3 w-full"
+                  >
+                    <input
+                      id="playerNameInput"
+                      class="block w-full h-14 px-5 text-lg font-bold placeholder:text-muted-light dark:placeholder:text-muted-dark bg-surface-light dark:bg-surface-dark rounded-full border-transparent focus:border-primary focus:ring-primary text-center"
+                      placeholder="أدخل اسمك"
+                      type="text"
+                    />
+
+                    <button
+                      id="quickPlayBtn"
+                      class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-14 px-5 bg-primary text-text-light text-lg font-bold leading-normal tracking-[0.015em] w-full transition-transform hover:scale-105 shadow-lg"
+                    >
+                      <span class="truncate">ابدأ اللعبة</span>
+                    </button>
+
+                    <div class="flex items-center gap-2 w-full">
+                      <input
+                        id="roomCodeInput"
+                        class="block w-full h-14 px-5 text-lg font-bold placeholder:text-muted-light dark:placeholder:text-muted-dark bg-surface-light dark:bg-surface-dark rounded-full border-transparent focus:border-primary focus:ring-primary text-center"
+                        placeholder="أدخل رمز الغرفة"
+                        type="text"
+                      />
+                      <button
+                        id="joinRoomBtn"
+                        class="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-14 px-5 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark text-lg font-bold leading-normal tracking-[0.015em] transition-transform hover:scale-105"
+                      >
+                        <span class="truncate">انضم</span>
+                      </button>
+                    </div>
+
+                    <button
+                      id="createRoomBtn"
+                      class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-14 px-5 bg-green-500 text-white text-lg font-bold leading-normal tracking-[0.015em] w-full transition-transform hover:scale-105 shadow-md"
+                    >
+                      <span class="truncate">أنشئ غرفة وادعُ أصدقاءك</span>
+                    </button>
+
+                    <div
+                      class="w-full border-t border-surface-light dark:border-surface-dark my-2"
+                    ></div>
+
+                    <button
+                      id="howToPlayBtn"
+                      class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-14 px-5 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark text-lg font-bold leading-normal tracking-[0.015em] w-full transition-transform hover:scale-105"
+                    >
+                      <span class="truncate">طريقة اللعب</span>
+                    </button>
+
+                    <button
+                      id="settingsBtn"
+                      class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-14 px-5 bg-surface-light dark:bg-surface-dark text-text-light dark:text-text-dark text-lg font-bold leading-normal tracking-[0.015em] w-full transition-transform hover:scale-105"
+                    >
+                      <span class="truncate">الإعدادات</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </main>
+
+            <footer
+              class="flex flex-col gap-6 px-5 py-10 text-center @container"
+            >
+              <div
+                class="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 @[480px]:flex-row @[480px]:justify-around"
+              >
+                <a
+                  class="text-muted-light dark:text-muted-dark text-base font-normal leading-normal min-w-40"
+                  href="#"
+                  >من نحن</a
+                >
+                <a
+                  class="text-muted-light dark:text-muted-dark text-base font-normal leading-normal min-w-40"
+                  href="#"
+                  >اتصل بنا</a
+                >
+              </div>
+              <p
+                class="text-muted-light dark:text-muted-dark text-base font-normal leading-normal"
+              >
+                © 2024 اسم نبات جماد حيوان. جميع الحقوق محفوظة.
+              </p>
+            </footer>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="js/main.js"></script>
+  </body>
+</html>

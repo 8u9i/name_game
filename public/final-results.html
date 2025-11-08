@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>النتيجة النهائية</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined"
+      rel="stylesheet"
+    />
+    <script src="/socket.io/socket.io.js"></script>
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#f4c434",
+              "background-light": "#f8f8f5",
+              "background-dark": "#221e10",
+              gold: "#ffd700",
+              silver: "#c0c0c0",
+              bronze: "#cd7f32",
+            },
+            fontFamily: {
+              display: ["Plus Jakarta Sans", "Noto Sans", "sans-serif"],
+            },
+            borderRadius: {
+              DEFAULT: "1rem",
+              lg: "2rem",
+              xl: "3rem",
+              full: "9999px",
+            },
+            boxShadow: {
+              "glow-gold": "0 0 15px 5px rgba(255, 215, 0, 0.5)",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      body {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      @keyframes confetti {
+        0% {
+          transform: translateY(-100%) rotate(0deg);
+        }
+        100% {
+          transform: translateY(100vh) rotate(360deg);
+        }
+      }
+      .confetti {
+        animation: confetti 3s linear infinite;
+      }
+    </style>
+  </head>
+  <body class="bg-background-light dark:bg-background-dark font-display">
+    <div
+      class="relative flex min-h-screen w-full flex-col items-center bg-background-light dark:bg-background-dark group/design-root overflow-x-hidden"
+    >
+      <div class="layout-container flex w-full h-full grow flex-col">
+        <main class="flex-1">
+          <div class="flex flex-1 justify-center py-10 sm:py-16 md:py-20">
+            <div
+              class="layout-content-container flex flex-col w-full max-w-4xl flex-1 px-4 sm:px-6 md:px-8"
+            >
+              <div
+                class="flex flex-wrap items-center justify-between gap-4 p-4 text-center w-full flex-col"
+              >
+                <div class="flex flex-col gap-1">
+                  <h1
+                    class="text-gray-900 dark:text-gray-50 text-4xl sm:text-5xl font-black leading-tight tracking-[-0.033em]"
+                  >
+                    النتيجة النهائية
+                  </h1>
+                  <p
+                    class="text-gray-500 dark:text-gray-400 text-lg sm:text-xl font-normal leading-normal"
+                  >
+                    تهانينا للفائزين! 🎉
+                  </p>
+                </div>
+              </div>
+
+              <!-- Winners -->
+              <div id="winnersList" class="flex flex-col gap-4 px-4 py-8">
+                <!-- سيتم ملؤها بـ JavaScript -->
+              </div>
+
+              <!-- Buttons -->
+              <div class="flex justify-center mt-8">
+                <div
+                  class="flex flex-col sm:flex-row flex-1 gap-3 px-4 py-3 max-w-lg justify-center"
+                >
+                  <button
+                    id="playAgainBtn"
+                    class="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-12 px-5 bg-primary text-gray-900 dark:text-gray-900 text-base font-bold leading-normal tracking-[0.015em] grow transition-transform duration-200 hover:scale-105"
+                  >
+                    <span class="truncate">العب مجدداً</span>
+                  </button>
+                  <button
+                    id="homeBtn"
+                    class="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-full h-12 px-5 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-base font-bold leading-normal tracking-[0.015em] grow transition-colors duration-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  >
+                    <span class="truncate">العودة للقائمة الرئيسية</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="js/final-results.js"></script>
+  </body>
+</html>

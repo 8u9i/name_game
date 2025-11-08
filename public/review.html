@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html class="light" dir="rtl" lang="ar">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>نتائج الجولة</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&amp;family=Tajawal:wght@400;500;700;800&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: "#3498db",
+              secondary: "#f4c434",
+              "background-light": "#f8f8f5",
+              "background-dark": "#221e10",
+              success: "#28a745",
+              danger: "#dc3545",
+              "neutral-100": "#f5f3f0",
+              "neutral-200": "#e6e3db",
+              "neutral-800": "#181611",
+              "neutral-600": "#8a8060",
+            },
+            fontFamily: {
+              display: ["Tajawal", "Plus Jakarta Sans", "sans-serif"],
+            },
+            borderRadius: {
+              DEFAULT: "1rem",
+              lg: "1.5rem",
+              xl: "2rem",
+              full: "9999px",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      .material-symbols-outlined {
+        font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-background-light dark:bg-background-dark font-display text-neutral-800 dark:text-neutral-100"
+  >
+    <div
+      class="relative flex min-h-screen w-full flex-col overflow-x-hidden group/design-root"
+    >
+      <div class="layout-container flex h-full grow flex-col">
+        <main class="flex-1 px-4 py-10 sm:px-6 lg:px-8">
+          <div
+            class="layout-content-container mx-auto flex max-w-5xl flex-col gap-8"
+          >
+            <!-- Page Heading & Timer -->
+            <div
+              class="flex flex-col items-center justify-between gap-6 rounded-lg p-4 md:flex-row md:gap-4"
+            >
+              <div
+                class="flex flex-col items-center gap-3 text-center md:items-start md:text-right"
+              >
+                <p
+                  id="roundTitle"
+                  class="text-4xl font-black leading-tight tracking-tight text-neutral-800 dark:text-neutral-100"
+                >
+                  نتائج الجولة
+                </p>
+                <p
+                  class="text-base font-normal leading-normal text-neutral-600 dark:text-neutral-200"
+                >
+                  صوّت على إجابات اللاعبين!
+                </p>
+              </div>
+              <div class="flex w-full max-w-xs flex-col items-center gap-2">
+                <p
+                  class="text-sm font-medium text-neutral-600 dark:text-neutral-200"
+                >
+                  الوقت المتبقي للتصويت
+                </p>
+                <div class="flex w-full gap-2 sm:gap-4">
+                  <div class="flex grow basis-0 flex-col items-stretch gap-2">
+                    <div
+                      class="flex h-14 grow items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800 px-3"
+                    >
+                      <p
+                        id="votingMinutes"
+                        class="text-lg font-bold leading-tight tracking-[-0.015em] text-neutral-800 dark:text-neutral-100"
+                      >
+                        01
+                      </p>
+                    </div>
+                    <div class="flex items-center justify-center">
+                      <p
+                        class="text-xs font-normal leading-normal text-neutral-800 dark:text-neutral-100"
+                      >
+                        دقائق
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex grow basis-0 flex-col items-stretch gap-2">
+                    <div
+                      class="flex h-14 grow items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800 px-3"
+                    >
+                      <p
+                        id="votingSeconds"
+                        class="text-lg font-bold leading-tight tracking-[-0.015em] text-secondary"
+                      >
+                        00
+                      </p>
+                    </div>
+                    <div class="flex items-center justify-center">
+                      <p
+                        class="text-xs font-normal leading-normal text-neutral-800 dark:text-neutral-100"
+                      >
+                        ثواني
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Voting Cards -->
+            <div id="votingCards" class="space-y-6">
+              <!-- سيتم ملؤها بـ JavaScript -->
+            </div>
+
+            <!-- Answers Table -->
+            <div class="w-full @container">
+              <div
+                class="overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-background-dark shadow-sm"
+              >
+                <div class="overflow-x-auto">
+                  <table class="min-w-full flex-1">
+                    <thead>
+                      <tr class="bg-neutral-100 dark:bg-neutral-800/50">
+                        <th
+                          class="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-neutral-800 dark:text-neutral-100 w-[200px]"
+                        >
+                          اسم اللاعب
+                        </th>
+                        <th
+                          class="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-neutral-800 dark:text-neutral-100 w-[120px]"
+                        >
+                          اسم
+                        </th>
+                        <th
+                          class="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-neutral-800 dark:text-neutral-100 w-[120px]"
+                        >
+                          حيوان
+                        </th>
+                        <th
+                          class="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-neutral-800 dark:text-neutral-100 w-[120px]"
+                        >
+                          نبات
+                        </th>
+                        <th
+                          class="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-neutral-800 dark:text-neutral-100 w-[120px]"
+                        >
+                          جماد
+                        </th>
+                        <th
+                          class="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-neutral-800 dark:text-neutral-100 w-[120px]"
+                        >
+                          بلد
+                        </th>
+                        <th
+                          class="whitespace-nowrap px-4 py-3 text-right text-sm font-bold text-neutral-800 dark:text-neutral-100 w-[100px]"
+                        >
+                          النقاط
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      id="answersTable"
+                      class="divide-y divide-neutral-200 dark:divide-neutral-600"
+                    >
+                      <!-- سيتم ملؤها بـ JavaScript -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- CTA Button -->
+            <div class="flex justify-center pt-6">
+              <button
+                id="nextRoundBtn"
+                class="flex items-center justify-center gap-2 rounded-lg bg-primary px-8 py-3 text-base font-bold text-white shadow-lg transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled
+              >
+                <span>في انتظار باقي اللاعبين...</span>
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script src="js/review.js"></script>
+  </body>
+</html>
