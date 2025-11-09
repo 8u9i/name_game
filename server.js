@@ -1,77 +1,43 @@
-
 const express = require("express");
 const app = express();
 const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 
-// تقديم الملفات الثابتة
+// Serve static files from the 'public' directory
 app.use(express.static("public"));
 
-// تخزين الغرف واللاعبين
+// In-memory storage for rooms and players
 const rooms = new Map();
 const players = new Map();
 
-// دالة لتوليد رمز غرفة عشوائي
+// --- Helper Functions ---
+
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-// دالة لتوليد حرف عشوائي
-function generateRandomLetter() {
-  const arabicLetters = [
-    "ا",
-    "ب",
-    "ت",
-    "ث",
-    "ج",
-    "ح",
-    "خ",
-    "د",
-    "ذ",
-    "ر",
-    "ز",
-    "س",
-    "ش",
-    "ص",
-    "ض",
-    "ط",
-    "ظ",
-    "ع",
-    "غ",
-    "ف",
-    "ق",
-    "ك",
-    "ل",
-    "م",
-    "ن",
-    "ه",
-    "و",
-    "ي",
-  ];
-  return arabicLetters[Math.floor(Math.random() * arabicLetters.length)];
-}
+// --- Socket.IO Connection Logic ---
 
-// الاتصال بـ Socket.IO
 io.on("connection", (socket) => {
-  console.log("لاعب جديد متصل:", socket.id);
+  console.log("A new player connected:", socket.id);
 
-  // إنشاء غرفة جديدة
+  // === ROOM CREATION ===
   socket.on("createRoom", (playerName) => {
-    console.log(`🎮 محاولة إنشاء غرفة من: ${playerName} (${socket.id})`);
+    console.log(`🎮 Player '${playerName}' (${socket.id}) is creating a room.`);
 
     const roomCode = generateRoomCode();
+    const newPlayer = {
+      id: socket.id,
+      name: playerName,
+      score: 0,
+      ready: false,
+    };
+    
     const room = {
       code: roomCode,
       host: socket.id,
-      players: [
-        {
-          id: socket.id,
-          name: playerName,
-          score: 0,
-          ready: false,
-        },
-      ],
-      status: "waiting", // waiting, playing, reviewing, finished
+      players: [newPlayer],
+      status: "waiting", // waiting, choosing, playing, reviewing, finished
       currentRound: 0,
       maxRounds: 5,
       currentLetter: null,
@@ -85,464 +51,373 @@ io.on("connection", (socket) => {
     players.set(socket.id, { roomCode, name: playerName });
     socket.join(roomCode);
 
-    socket.emit("roomCreated", {
-      roomCode,
-      player: room.players[0],
-    });
-
-    console.log(`✅ غرفة جديدة: ${roomCode} بواسطة ${playerName}`);
-    console.log(`📊 عدد الغرف الحالية: ${rooms.size}`);
+    socket.emit("roomCreated", { roomCode, player: newPlayer });
+    console.log(`✅ Room '${roomCode}' created by '${playerName}'. Total rooms: ${rooms.size}`);
   });
 
-  // الانضمام لغرفة موجودة
+  // === JOINING A ROOM ===
   socket.on("joinRoom", ({ roomCode, playerName }) => {
-    console.log(`🚪 محاولة انضمام: ${playerName} للغرفة ${roomCode}`);
-    console.log(`📊 الغرف المتاحة:`, Array.from(rooms.keys()));
+    console.log(`🚪 Player '${playerName}' is trying to join room '${roomCode}'.`);
 
     const room = rooms.get(roomCode);
 
+    // --- Validation Checks ---
     if (!room) {
-      console.log(`❌ الغرفة ${roomCode} غير موجودة`);
-      socket.emit("error", "الغرفة غير موجودة أو انتهت صلاحيتها");
-      return;
+      return socket.emit("error", "Room not found.");
     }
-
     if (room.status !== "waiting") {
-      socket.emit("error", "اللعبة قد بدأت بالفعل");
-      return;
+      return socket.emit("error", "The game has already started.");
     }
-
     if (room.players.length >= 6) {
-      socket.emit("error", "الغرفة ممتلئة (6 لاعبين كحد أقصى)");
-      return;
+      return socket.emit("error", "The room is full.");
     }
 
-    // التحقق إذا كان اللاعب موجود مسبقاً (إعادة اتصال)
-    const existingPlayer = room.players.find((p) => p.name === playerName);
-    if (existingPlayer) {
-      // تحديث socket id
-      existingPlayer.id = socket.id;
-      players.set(socket.id, { roomCode, name: playerName });
-      socket.join(roomCode);
-
-      socket.emit("joinedRoom", { roomCode, player: existingPlayer });
-      io.to(roomCode).emit("playerReconnected", {
-        player: existingPlayer,
-        players: room.players,
-      });
-
-      console.log(`♻️ ${playerName} أعاد الاتصال بالغرفة ${roomCode}`);
-      return;
+    // [CRITICAL FIX] Prevent players with the same name from joining the same room.
+    // This was the source of the original bug.
+    const isNameTaken = room.players.some((p) => p.name === playerName);
+    if (isNameTaken) {
+      return socket.emit("error", "This name is already taken in this room.");
     }
 
-    const player = {
+    // --- Add Player to Room ---
+    const newPlayer = {
       id: socket.id,
       name: playerName,
       score: 0,
       ready: false,
     };
 
-    room.players.push(player);
+    room.players.push(newPlayer);
     players.set(socket.id, { roomCode, name: playerName });
     socket.join(roomCode);
 
-    socket.emit("joinedRoom", { roomCode, player });
-    io.to(roomCode).emit("playerJoined", {
-      player,
-      players: room.players,
-    });
+    // Let the new player know they joined successfully and give them the full player list.
+    socket.emit("joinedRoom", { roomCode, player: newPlayer, players: room.players });
 
-    console.log(`✅ ${playerName} انضم للغرفة ${roomCode}`);
+    // Let everyone else in the room know a new player has joined.
+    socket.broadcast.to(roomCode).emit("playerJoined", { player: newPlayer, players: room.players });
+
+    console.log(`✅ '${playerName}' joined room '${roomCode}'. Players: ${room.players.length}`);
   });
 
-  // اللاعب جاهز
-  socket.on("playerReady", ({ roomCode }) => {
+  // === PLAYER READY STATE ===
+  socket.on("playerReady", () => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
-
-    const room = rooms.get(roomCode || playerData.roomCode);
+    const room = rooms.get(playerData.roomCode);
     if (!room) return;
 
     const player = room.players.find((p) => p.id === socket.id);
     if (player) {
-      player.ready = true;
+      player.ready = !player.ready; // Toggle ready state
       io.to(room.code).emit("playerReadyUpdate", {
         playerId: socket.id,
-        players: room.players,
+        isReady: player.ready
       });
 
-      console.log(`✅ ${player.name} أصبح جاهزاً في الغرفة ${room.code}`);
+      console.log(`👍 '${player.name}' is now ${player.ready ? 'ready' : 'not ready'}.`);
 
-      // التحقق إذا كل اللاعبين جاهزين
+      // Check if the game can start
       const allReady = room.players.every((p) => p.ready);
       if (allReady && room.players.length >= 2) {
-        console.log(`🎮 بدء اللعبة في الغرفة ${room.code}`);
         startGame(room.code);
       }
     }
   });
 
-  // بدء اللعبة
-  function startGame(roomCode) {
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    room.status = "choosing";
-    room.currentRound = 1;
-    room.currentLetter = null;
-    room.timer = 60;
-    room.answers.clear();
-    room.letterChooserIndex = 0;
-
-    console.log(`🎲 بدء مرحلة اختيار الحرف في الغرفة ${roomCode}`);
-    // الانتقال لصفحة اختيار الحرف
-    chooseLetterPhase(roomCode);
-  }
-
-  // مرحلة اختيار الحرف
-  function chooseLetterPhase(roomCode) {
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    // اختيار لاعب بالترتيب
-    const chooserIndex = room.letterChooserIndex % room.players.length;
-    const chooser = room.players[chooserIndex];
-
-    console.log(`👉 دور ${chooser.name} لاختيار الحرف في الغرفة ${roomCode}`);
-
-    // إخبار اللاعب المختار
-    io.to(chooser.id).emit("yourTurnToChoose");
-
-    // إخبار باقي اللاعبين بالانتظار
-    room.players.forEach((player) => {
-      if (player.id !== chooser.id) {
-        io.to(player.id).emit("waitingForPlayerToChoose", {
-          playerName: chooser.name,
-        });
-      }
-    });
-  }
-
-  // عند اختيار الحرف
+  // === LETTER SELECTION ===
   socket.on("letterChosen", (letter) => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
-
     const room = rooms.get(playerData.roomCode);
     if (!room || room.status !== "choosing") return;
 
+    // Security check: ensure the correct player is choosing
+    const chooser = room.players[room.letterChooserIndex % room.players.length];
+    if (socket.id !== chooser.id) {
+        return console.log(`⚠️ Security: '${playerData.name}' tried to choose a letter out of turn.`);
+    }
+
     room.currentLetter = letter;
     room.status = "playing";
+    console.log(`🔤 Letter '${letter}' was chosen for room '${room.code}'.`);
 
-    console.log(`🔤 تم اختيار الحرف "${letter}" في الغرفة ${playerData.roomCode}`);
-
-    // إخبار جميع اللاعبين بالحرف المختار
-    io.to(playerData.roomCode).emit("letterSelected", {
-      letter: letter,
+    io.to(room.code).emit("gameStarted", {
+      letter: room.currentLetter,
       round: room.currentRound,
       maxRounds: room.maxRounds,
     });
 
-    // بدء الجولة بعد ثانية
-    setTimeout(() => {
-      io.to(playerData.roomCode).emit("gameStarted", {
-        letter: room.currentLetter,
-        round: room.currentRound,
-        maxRounds: room.maxRounds,
-        timer: room.timer,
-      });
-
-      startTimer(playerData.roomCode);
-    }, 1000);
+    startTimer(room.code);
   });
 
-  // العد التنازلي
-  function startTimer(roomCode) {
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    // إلغاء أي timer سابق
-    if (room.timerInterval) {
-      clearInterval(room.timerInterval);
-    }
-
-    const timerInterval = setInterval(() => {
-      room.timer--;
-      io.to(roomCode).emit("timerUpdate", room.timer);
-
-      if (room.timer <= 0) {
-        clearInterval(timerInterval);
-        room.timerInterval = null;
-        endRound(roomCode);
-      }
-    }, 1000);
-
-    // حفظ الـ interval في الغرفة للإلغاء عند الحاجة
-    room.timerInterval = timerInterval;
-  }
-
-  // طلب بيانات اللاعبين
-  socket.on("requestPlayersData", () => {
-    const playerData = players.get(socket.id);
-    if (!playerData) return;
-
-    const room = rooms.get(playerData.roomCode);
-    if (!room) return;
-
-    const playersWithCurrentFlag = room.players.map((p) => ({
-      ...p,
-      isCurrentPlayer: p.id === socket.id,
-    }));
-
-    socket.emit("playersData", {
-      players: playersWithCurrentFlag,
-    });
-  });
-
-  // استلام إجابات اللاعب
+  // === ANSWER SUBMISSION ===
   socket.on("submitAnswers", (answers) => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
-
     const room = rooms.get(playerData.roomCode);
     if (!room || room.status !== "playing") return;
 
-    room.answers.set(socket.id, {
-      playerName: playerData.name,
-      answers: answers,
-      votes: new Map(),
-    });
+    room.answers.set(socket.id, answers);
+    console.log(`📝 '${playerData.name}' submitted answers. (${room.answers.size}/${room.players.length})`);
 
-    console.log(`📝 ${playerData.name} قدم إجاباته (${room.answers.size}/${room.players.length})`);
+    io.to(room.code).emit("playerSubmitted", { playerId: socket.id });
 
-    io.to(playerData.roomCode).emit("playerSubmitted", {
-      playerId: socket.id,
-      playerName: playerData.name,
-      totalSubmitted: room.answers.size,
-      totalPlayers: room.players.length,
-    });
-
-    // إذا كل اللاعبين أرسلوا إجاباتهم
+    // If everyone has submitted, end the round early.
     if (room.answers.size === room.players.length) {
-      if (room.timerInterval) {
-        clearInterval(room.timerInterval);
-        room.timerInterval = null;
-      }
-      endRound(playerData.roomCode);
+      endRound(room.code);
     }
   });
-
-  // انتهاء الجولة
-  function endRound(roomCode) {
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    room.status = "reviewing";
-
-    console.log(`⏰ انتهت الجولة ${room.currentRound} في الغرفة ${roomCode}`);
-
-    // تحويل answers Map إلى array
-    const answersArray = Array.from(room.answers.entries()).map(
-      ([playerId, data]) => ({
-        playerId,
-        playerName: data.playerName,
-        answers: data.answers,
-      })
-    );
-
-    io.to(roomCode).emit("roundEnded", {
-      answers: answersArray,
-      letter: room.currentLetter,
-    });
-  }
-
-  // التصويت على الإجابات
-  socket.on("voteAnswers", ({ playerId, votes }) => {
+  
+  // === PLAYER FINISHED REVIEWING SCORES ===
+  socket.on('finishedReviewing', () => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
-
     const room = rooms.get(playerData.roomCode);
     if (!room || room.status !== "reviewing") return;
 
-    const targetAnswers = room.answers.get(playerId);
-    if (!targetAnswers) return;
-
-    targetAnswers.votes.set(socket.id, votes);
-
-    console.log(`🗳️ ${playerData.name} صوّت على إجابات اللاعب ${playerId}`);
-
-    // التحقق إذا كل اللاعبين صوتوا على جميع الإجابات
-    let allVoted = true;
-    room.answers.forEach((answerData, answerPlayerId) => {
-      const requiredVotes = room.players.length - 1; // كل اللاعبين ماعدا صاحب الإجابة
-      if (answerData.votes.size < requiredVotes) {
-        allVoted = false;
-      }
-    });
-
-    if (allVoted) {
-      console.log(`✅ جميع اللاعبين صوّتوا، حساب النقاط...`);
-      calculateScores(playerData.roomCode);
+    const player = room.players.find(p => p.id === socket.id);
+    if (player) {
+      player.finishedReviewing = true;
     }
-  });
 
-  // حساب النقاط
-  function calculateScores(roomCode) {
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    const categories = ["name", "plant", "animal", "thing", "country"];
-    const scores = new Map();
-
-    // حساب نقاط كل لاعب
-    room.answers.forEach((data, playerId) => {
-      let playerScore = 0;
-
-      categories.forEach((category) => {
-        const answer = data.answers[category];
-        if (!answer || answer.trim() === "") return;
-
-        // عد الأصوات الموافقة
-        let approveCount = 0;
-        data.votes.forEach((vote) => {
-          if (vote[category] === true) approveCount++;
-        });
-
-        const totalVoters = data.votes.size;
-        // إذا أكثر من 50% وافقوا
-        if (totalVoters > 0 && approveCount > totalVoters / 2) {
-          playerScore += 10;
-        }
-      });
-
-      scores.set(playerId, playerScore);
-
-      // تحديث النقاط الكلية
-      const player = room.players.find((p) => p.id === playerId);
-      if (player) {
-        player.score += playerScore;
-      }
-    });
-
-    console.log(`📊 النقاط:`, Array.from(scores.entries()));
-
-    io.to(roomCode).emit("scoresCalculated", {
-      roundScores: Array.from(scores.entries()).map(([id, score]) => ({
-        playerId: id,
-        score,
-      })),
-      totalScores: room.players.map((p) => ({
-        playerId: p.id,
-        name: p.name,
-        score: p.score,
-      })),
-    });
-
-    // الانتقال للجولة التالية أو إنهاء اللعبة
-    setTimeout(() => {
+    const allFinished = room.players.every(p => p.finishedReviewing);
+    if (allFinished) {
+      console.log(`✅ All players in '${room.code}' are ready for the next round.`);
+      // Reset the flag for the next round
+      room.players.forEach(p => p.finishedReviewing = false);
+      
+      // Proceed to the next phase
       if (room.currentRound < room.maxRounds) {
-        nextRound(roomCode);
+        nextRound(room.code);
       } else {
-        endGame(roomCode);
+        endGame(room.code);
       }
-    }, 5000);
-  }
-
-  // الجولة التالية
-  function nextRound(roomCode) {
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    room.currentRound++;
-    room.currentLetter = null;
-    room.timer = 60;
-    room.answers.clear();
-    room.status = "choosing";
-    room.letterChooserIndex++;
-
-    console.log(`➡️ الانتقال للجولة ${room.currentRound} في الغرفة ${roomCode}`);
-
-    // العودة لمرحلة اختيار الحرف
-    chooseLetterPhase(roomCode);
-  }
-
-  // إنهاء اللعبة
-  function endGame(roomCode) {
-    const room = rooms.get(roomCode);
-    if (!room) return;
-
-    room.status = "finished";
-
-    // ترتيب اللاعبين حسب النقاط
-    const sortedPlayers = [...room.players].sort((a, b) => b.score - a.score);
-
-    console.log(`🏆 انتهت اللعبة في الغرفة ${roomCode}، الفائز: ${sortedPlayers[0].name}`);
-
-    io.to(roomCode).emit("gameEnded", {
-      winner: sortedPlayers[0],
-      rankings: sortedPlayers,
-    });
-  }
-
-  // مغادرة الغرفة
-  socket.on("leaveRoom", ({ roomCode }) => {
-    handlePlayerLeave(socket.id, roomCode);
+    }
   });
 
-  // دالة مساعدة للتعامل مع مغادرة اللاعب
-  function handlePlayerLeave(socketId, roomCode) {
-    const playerData = players.get(socketId);
-    if (!playerData && !roomCode) return;
 
-    const targetRoomCode = roomCode || playerData.roomCode;
-    const room = rooms.get(targetRoomCode);
-    if (!room) return;
-
-    // إزالة اللاعب من الغرفة
-    const playerName = playerData ? playerData.name : "Unknown";
-    room.players = room.players.filter((p) => p.id !== socketId);
-    players.delete(socketId);
-
-    console.log(`👋 ${playerName} غادر الغرفة ${targetRoomCode}`);
-
-    if (room.players.length === 0) {
-      // إبقاء الغرفة لمدة 5 دقائق قبل الحذف
-      console.log(`⏰ الغرفة ${targetRoomCode} فارغة، سيتم حذفها بعد 5 دقائق`);
-
-      setTimeout(() => {
-        const currentRoom = rooms.get(targetRoomCode);
-        if (currentRoom && currentRoom.players.length === 0) {
-          if (currentRoom.timerInterval) {
-            clearInterval(currentRoom.timerInterval);
-          }
-          rooms.delete(targetRoomCode);
-          console.log(`🗑️ تم حذف الغرفة ${targetRoomCode} (فارغة لمدة 5 دقائق)`);
-        }
-      }, 5 * 60 * 1000);
-    } else {
-      // إذا كان المضيف، جعل لاعب آخر مضيف
-      if (room.host === socketId) {
-        room.host = room.players[0].id;
-        console.log(`👑 ${room.players[0].name} أصبح المضيف الجديد`);
-      }
-
-      io.to(targetRoomCode).emit("playerLeft", {
-        playerId: socketId,
-        playerName: playerName,
-        players: room.players,
-      });
-    }
-  }
-
-  // اللاعب انقطع عنه الاتصال
+  // === DISCONNECTION / LEAVING ===
   socket.on("disconnect", () => {
-    console.log(`🔌 انقطع الاتصال: ${socket.id}`);
+    handlePlayerLeave(socket.id);
+  });
+
+  socket.on("leaveRoom", () => {
     handlePlayerLeave(socket.id);
   });
 });
 
+// --- Game Logic Functions ---
+
+function startGame(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room || room.status !== "waiting") return;
+
+  console.log(`🚀 Starting game in room '${roomCode}'!`);
+  room.status = "choosing";
+  room.currentRound = 1;
+  room.letterChooserIndex = 0;
+
+  // Reset scores for a new game
+  room.players.forEach(p => p.score = 0);
+  
+  io.to(roomCode).emit('gameStarting');
+  chooseLetterPhase(roomCode);
+}
+
+function chooseLetterPhase(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+
+  // Clear previous round data
+  room.answers.clear();
+  room.timer = 60;
+  if(room.timerInterval) clearInterval(room.timerInterval);
+
+  room.status = 'choosing';
+  const chooser = room.players[room.letterChooserIndex % room.players.length];
+  
+  console.log(`👉 It's '${chooser.name}'s turn to choose a letter in room '${room.code}'.`);
+
+  io.to(roomCode).emit('newRoundPhase', { 
+    phase: 'choosing',
+    chooserName: chooser.name,
+    chooserId: chooser.id,
+    round: room.currentRound
+  });
+}
+
+function startTimer(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+
+  if (room.timerInterval) clearInterval(room.timerInterval);
+  room.timer = 60; // Reset timer
+
+  room.timerInterval = setInterval(() => {
+    room.timer--;
+    io.to(roomCode).emit("timerUpdate", room.timer);
+
+    if (room.timer <= 0) {
+      endRound(roomCode);
+    }
+  }, 1000);
+}
+
+function endRound(roomCode) {
+  const room = rooms.get(roomCode);
+  // Prevent this function from running multiple times for the same round
+  if (!room || room.status === 'reviewing') return; 
+
+  console.log(`⏰ Round ${room.currentRound} ended in room '${roomCode}'.`);
+  room.status = "reviewing";
+  if (room.timerInterval) {
+    clearInterval(room.timerInterval);
+    room.timerInterval = null;
+  }
+  
+  // Ensure every player has an entry in the answers map, even if empty.
+  room.players.forEach(player => {
+    if (!room.answers.has(player.id)) {
+      room.answers.set(player.id, {}); // Empty answers
+    }
+  });
+
+  calculateScores(roomCode);
+}
+
+function calculateScores(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+
+  const categories = ["name", "plant", "animal", "thing", "country"];
+  const roundScores = new Map();
+  room.players.forEach(p => roundScores.set(p.id, 0)); // Initialize round scores
+
+  categories.forEach(category => {
+    const categoryAnswers = new Map();
+    // Collect all answers for the current category and count who submitted them
+    room.answers.forEach((answers, playerId) => {
+      const answer = answers[category]?.trim().toLowerCase();
+      if (answer) {
+        if (!categoryAnswers.has(answer)) {
+          categoryAnswers.set(answer, []);
+        }
+        categoryAnswers.get(answer).push(playerId);
+      }
+    });
+
+    // Award points based on uniqueness
+    categoryAnswers.forEach((playerIds, answer) => {
+      if (playerIds.length === 1) { // Unique answer
+        const pid = playerIds[0];
+        roundScores.set(pid, roundScores.get(pid) + 10);
+      } else { // Shared answer
+        playerIds.forEach(pid => {
+          roundScores.set(pid, roundScores.get(pid) + 5);
+        });
+      }
+    });
+  });
+
+  // Update total scores
+  roundScores.forEach((score, playerId) => {
+    const player = room.players.find(p => p.id === playerId);
+    if (player) {
+      player.score += score;
+    }
+  });
+  
+  const allAnswers = Array.from(room.answers.entries()).map(([playerId, answers]) => ({
+      playerId,
+      playerName: room.players.find(p => p.id === playerId)?.name,
+      answers
+  }));
+
+  console.log(`📊 Scores calculated for room '${roomCode}'.`);
+  io.to(roomCode).emit("scoresCalculated", {
+    allAnswers,
+    roundScores: Array.from(roundScores.entries()).map(([id, score]) => ({ playerId: id, score })),
+    totalScores: room.players.map(p => ({ playerId: p.id, name: p.name, score: p.score })),
+  });
+}
+
+function nextRound(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+
+  room.currentRound++;
+  room.letterChooserIndex++;
+  console.log(`➡️  Starting next round (${room.currentRound}) for room '${roomCode}'.`);
+  chooseLetterPhase(roomCode);
+}
+
+function endGame(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+
+  room.status = "finished";
+  const sortedPlayers = [...room.players].sort((a, b) => b.score - a.score);
+  
+  console.log(`🏆 Game ended in room '${roomCode}'. Winner: ${sortedPlayers[0]?.name}`);
+  io.to(roomCode).emit("gameEnded", {
+    winner: sortedPlayers[0],
+    rankings: sortedPlayers,
+  });
+
+  // Clean up the room after a delay
+  setTimeout(() => {
+    if (rooms.has(roomCode)) {
+      if(rooms.get(roomCode)?.timerInterval) clearInterval(rooms.get(roomCode).timerInterval);
+      rooms.delete(roomCode);
+      console.log(`🗑️ Room '${roomCode}' has been deleted after game ended.`);
+    }
+  }, 30 * 1000); // 30 seconds
+}
+
+function handlePlayerLeave(socketId) {
+  const playerData = players.get(socketId);
+  if (!playerData) return;
+
+  const { roomCode, name } = playerData;
+  const room = rooms.get(roomCode);
+  
+  players.delete(socketId);
+  if (!room) return;
+
+  console.log(`👋 Player '${name}' (${socketId}) left room '${roomCode}'.`);
+  room.players = room.players.filter((p) => p.id !== socketId);
+
+  if (room.players.length === 0) {
+    console.log(`🗑️ Room '${roomCode}' is empty and is being deleted.`);
+    if (room.timerInterval) clearInterval(room.timerInterval);
+    rooms.delete(roomCode);
+  } else {
+    // If the host left, assign a new host
+    if (room.host === socketId) {
+      room.host = room.players[0].id;
+      console.log(`👑 '${room.players[0].name}' is the new host of room '${roomCode}'.`);
+    }
+
+    // Inform remaining players
+    io.to(roomCode).emit("playerLeft", {
+      playerId: socketId,
+      playerName: name,
+      players: room.players,
+      newHostId: room.host,
+    });
+    
+    // If a game was in progress, check if conditions are met to end the round
+    if (room.status === "playing" && room.answers.size === room.players.length) {
+        endRound(roomCode);
+    }
+  }
+}
+
+// --- Server Startup ---
+
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log(`🎮 السيرفر يعمل على المنفذ ${PORT}`);
-  console.log(`🌐 افتح المتصفح على: http://localhost:${PORT}`);
+  console.log(`🎮 Server is running on port ${PORT}`);
+  console.log(`🌐 Open in browser: http://localhost:${PORT}`);
 });
