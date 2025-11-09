@@ -1,3 +1,4 @@
+
 const express = require("express");
 const app = express();
 const http = require("http").createServer(app);
@@ -76,6 +77,8 @@ io.on("connection", (socket) => {
       currentLetter: null,
       timer: 60,
       answers: new Map(),
+      timerInterval: null,
+      letterChooserIndex: 0,
     };
 
     rooms.set(roomCode, room);
@@ -150,26 +153,31 @@ io.on("connection", (socket) => {
     });
 
     console.log(`✅ ${playerName} انضم للغرفة ${roomCode}`);
-  }); // اللاعب جاهز
-  socket.on("playerReady", () => {
+  });
+
+  // اللاعب جاهز
+  socket.on("playerReady", ({ roomCode }) => {
     const playerData = players.get(socket.id);
     if (!playerData) return;
 
-    const room = rooms.get(playerData.roomCode);
+    const room = rooms.get(roomCode || playerData.roomCode);
     if (!room) return;
 
     const player = room.players.find((p) => p.id === socket.id);
     if (player) {
       player.ready = true;
-      io.to(playerData.roomCode).emit("playerReadyUpdate", {
+      io.to(room.code).emit("playerReadyUpdate", {
         playerId: socket.id,
         players: room.players,
       });
 
+      console.log(`✅ ${player.name} أصبح جاهزاً في الغرفة ${room.code}`);
+
       // التحقق إذا كل اللاعبين جاهزين
       const allReady = room.players.every((p) => p.ready);
       if (allReady && room.players.length >= 2) {
-        startGame(playerData.roomCode);
+        console.log(`🎮 بدء اللعبة في الغرفة ${room.code}`);
+        startGame(room.code);
       }
     }
   });
@@ -184,8 +192,9 @@ io.on("connection", (socket) => {
     room.currentLetter = null;
     room.timer = 60;
     room.answers.clear();
-    room.letterChooserIndex = 0; // فهرس اللاعب الذي سيختار الحرف
+    room.letterChooserIndex = 0;
 
+    console.log(`🎲 بدء مرحلة اختيار الحرف في الغرفة ${roomCode}`);
     // الانتقال لصفحة اختيار الحرف
     chooseLetterPhase(roomCode);
   }
@@ -198,6 +207,8 @@ io.on("connection", (socket) => {
     // اختيار لاعب بالترتيب
     const chooserIndex = room.letterChooserIndex % room.players.length;
     const chooser = room.players[chooserIndex];
+
+    console.log(`👉 دور ${chooser.name} لاختيار الحرف في الغرفة ${roomCode}`);
 
     // إخبار اللاعب المختار
     io.to(chooser.id).emit("yourTurnToChoose");
@@ -222,6 +233,8 @@ io.on("connection", (socket) => {
 
     room.currentLetter = letter;
     room.status = "playing";
+
+    console.log(`🔤 تم اختيار الحرف "${letter}" في الغرفة ${playerData.roomCode}`);
 
     // إخبار جميع اللاعبين بالحرف المختار
     io.to(playerData.roomCode).emit("letterSelected", {
@@ -248,12 +261,18 @@ io.on("connection", (socket) => {
     const room = rooms.get(roomCode);
     if (!room) return;
 
+    // إلغاء أي timer سابق
+    if (room.timerInterval) {
+      clearInterval(room.timerInterval);
+    }
+
     const timerInterval = setInterval(() => {
       room.timer--;
       io.to(roomCode).emit("timerUpdate", room.timer);
 
       if (room.timer <= 0) {
         clearInterval(timerInterval);
+        room.timerInterval = null;
         endRound(roomCode);
       }
     }, 1000);
@@ -291,8 +310,10 @@ io.on("connection", (socket) => {
     room.answers.set(socket.id, {
       playerName: playerData.name,
       answers: answers,
-      votes: new Map(), // playerId -> {name: true/false, plant: true/false, ...}
+      votes: new Map(),
     });
+
+    console.log(`📝 ${playerData.name} قدم إجاباته (${room.answers.size}/${room.players.length})`);
 
     io.to(playerData.roomCode).emit("playerSubmitted", {
       playerId: socket.id,
@@ -305,6 +326,7 @@ io.on("connection", (socket) => {
     if (room.answers.size === room.players.length) {
       if (room.timerInterval) {
         clearInterval(room.timerInterval);
+        room.timerInterval = null;
       }
       endRound(playerData.roomCode);
     }
@@ -316,6 +338,8 @@ io.on("connection", (socket) => {
     if (!room) return;
 
     room.status = "reviewing";
+
+    console.log(`⏰ انتهت الجولة ${room.currentRound} في الغرفة ${roomCode}`);
 
     // تحويل answers Map إلى array
     const answersArray = Array.from(room.answers.entries()).map(
@@ -345,15 +369,19 @@ io.on("connection", (socket) => {
 
     targetAnswers.votes.set(socket.id, votes);
 
-    // التحقق إذا كل اللاعبين صوتوا
-    const allVoted = room.players.every((p) => {
-      if (p.id === playerId) return true; // صاحب الإجابة لا يصوت لنفسه
-      return Array.from(room.answers.values()).every((ans) =>
-        ans.votes.has(p.id)
-      );
+    console.log(`🗳️ ${playerData.name} صوّت على إجابات اللاعب ${playerId}`);
+
+    // التحقق إذا كل اللاعبين صوتوا على جميع الإجابات
+    let allVoted = true;
+    room.answers.forEach((answerData, answerPlayerId) => {
+      const requiredVotes = room.players.length - 1; // كل اللاعبين ماعدا صاحب الإجابة
+      if (answerData.votes.size < requiredVotes) {
+        allVoted = false;
+      }
     });
 
     if (allVoted) {
+      console.log(`✅ جميع اللاعبين صوّتوا، حساب النقاط...`);
       calculateScores(playerData.roomCode);
     }
   });
@@ -380,8 +408,9 @@ io.on("connection", (socket) => {
           if (vote[category] === true) approveCount++;
         });
 
+        const totalVoters = data.votes.size;
         // إذا أكثر من 50% وافقوا
-        if (approveCount > room.players.length / 2) {
+        if (totalVoters > 0 && approveCount > totalVoters / 2) {
           playerScore += 10;
         }
       });
@@ -394,6 +423,8 @@ io.on("connection", (socket) => {
         player.score += playerScore;
       }
     });
+
+    console.log(`📊 النقاط:`, Array.from(scores.entries()));
 
     io.to(roomCode).emit("scoresCalculated", {
       roundScores: Array.from(scores.entries()).map(([id, score]) => ({
@@ -427,7 +458,9 @@ io.on("connection", (socket) => {
     room.timer = 60;
     room.answers.clear();
     room.status = "choosing";
-    room.letterChooserIndex++; // الانتقال للاعب التالي
+    room.letterChooserIndex++;
+
+    console.log(`➡️ الانتقال للجولة ${room.currentRound} في الغرفة ${roomCode}`);
 
     // العودة لمرحلة اختيار الحرف
     chooseLetterPhase(roomCode);
@@ -443,55 +476,68 @@ io.on("connection", (socket) => {
     // ترتيب اللاعبين حسب النقاط
     const sortedPlayers = [...room.players].sort((a, b) => b.score - a.score);
 
+    console.log(`🏆 انتهت اللعبة في الغرفة ${roomCode}، الفائز: ${sortedPlayers[0].name}`);
+
     io.to(roomCode).emit("gameEnded", {
       winner: sortedPlayers[0],
       rankings: sortedPlayers,
     });
   }
 
-  // اللاعب غادر
-  socket.on("disconnect", () => {
-    const playerData = players.get(socket.id);
-    if (!playerData) return;
+  // مغادرة الغرفة
+  socket.on("leaveRoom", ({ roomCode }) => {
+    handlePlayerLeave(socket.id, roomCode);
+  });
 
-    const room = rooms.get(playerData.roomCode);
+  // دالة مساعدة للتعامل مع مغادرة اللاعب
+  function handlePlayerLeave(socketId, roomCode) {
+    const playerData = players.get(socketId);
+    if (!playerData && !roomCode) return;
+
+    const targetRoomCode = roomCode || playerData.roomCode;
+    const room = rooms.get(targetRoomCode);
     if (!room) return;
 
     // إزالة اللاعب من الغرفة
-    room.players = room.players.filter((p) => p.id !== socket.id);
-    players.delete(socket.id);
+    const playerName = playerData ? playerData.name : "Unknown";
+    room.players = room.players.filter((p) => p.id !== socketId);
+    players.delete(socketId);
+
+    console.log(`👋 ${playerName} غادر الغرفة ${targetRoomCode}`);
 
     if (room.players.length === 0) {
       // إبقاء الغرفة لمدة 5 دقائق قبل الحذف
-      console.log(
-        `⏰ الغرفة ${playerData.roomCode} فارغة، سيتم حذفها بعد 5 دقائق`
-      );
+      console.log(`⏰ الغرفة ${targetRoomCode} فارغة، سيتم حذفها بعد 5 دقائق`);
 
       setTimeout(() => {
-        const currentRoom = rooms.get(playerData.roomCode);
+        const currentRoom = rooms.get(targetRoomCode);
         if (currentRoom && currentRoom.players.length === 0) {
           if (currentRoom.timerInterval) {
             clearInterval(currentRoom.timerInterval);
           }
-          rooms.delete(playerData.roomCode);
-          console.log(
-            `🗑️ تم حذف الغرفة ${playerData.roomCode} (فارغة لمدة 5 دقائق)`
-          );
+          rooms.delete(targetRoomCode);
+          console.log(`🗑️ تم حذف الغرفة ${targetRoomCode} (فارغة لمدة 5 دقائق)`);
         }
-      }, 5 * 60 * 1000); // 5 دقائق
+      }, 5 * 60 * 1000);
     } else {
       // إذا كان المضيف، جعل لاعب آخر مضيف
-      if (room.host === socket.id) {
+      if (room.host === socketId) {
         room.host = room.players[0].id;
+        console.log(`👑 ${room.players[0].name} أصبح المضيف الجديد`);
       }
 
-      io.to(playerData.roomCode).emit("playerLeft", {
-        playerId: socket.id,
+      io.to(targetRoomCode).emit("playerLeft", {
+        playerId: socketId,
+        playerName: playerName,
         players: room.players,
       });
     }
+  }
 
-    console.log(`${playerData.name} غادر الغرفة ${playerData.roomCode}`);
+  // اللاعب انقطع عنه الاتصال
+  socket.on("disconnect", () => {
+    console.log(`🔌 انقطع الاتصال: ${socket.id}`);
+    handlePlayerLeave(socket.id);
   });
 });
 
