@@ -1,3 +1,4 @@
+
 // الاتصال بالسيرفر
 const socket = io();
 
@@ -25,6 +26,9 @@ let players = [];
 // عرض رمز الغرفة
 roomCodeDisplay.textContent = roomCode;
 
+// الانضمام للغرفة عند تحميل الصفحة
+socket.emit("joinRoom", { roomCode });
+
 // نسخ رمز الغرفة
 copyCodeBtn.addEventListener("click", () => {
   navigator.clipboard.writeText(roomCode).then(() => {
@@ -47,7 +51,7 @@ readyBtn.addEventListener("click", () => {
   readyBtn.innerHTML = '<span class="truncate">✓ جاهز</span>';
   readyBtn.disabled = true;
 
-  socket.emit("playerReady");
+  socket.emit("playerReady", { roomCode });
 });
 
 // تحديث قائمة اللاعبين
@@ -92,8 +96,10 @@ function updatePlayersList(playersList_data) {
     waitingMessage.classList.add("text-green-500", "font-bold");
   } else if (players.length < 2) {
     waitingMessage.textContent = "في انتظار لاعب آخر على الأقل...";
+    waitingMessage.classList.remove("text-green-500", "font-bold");
   } else {
     waitingMessage.textContent = `${readyCount}/${players.length} جاهزون`;
+    waitingMessage.classList.remove("text-green-500", "font-bold");
   }
 }
 
@@ -102,9 +108,14 @@ socket.on("playerJoined", (data) => {
   updatePlayersList(data.players);
 
   // إشعار صوتي (اختياري)
-  const audio = new Audio(
-    "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzPLZjToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+"
-  );
+  try {
+    const audio = new Audio(
+      "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzPLZjToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+"
+    );
+    audio.play().catch(err => console.log("Audio play failed:", err));
+  } catch (error) {
+    console.log("Audio creation failed:", error);
+  }
 });
 
 // عند تحديث حالة الاستعداد
@@ -114,16 +125,17 @@ socket.on("playerReadyUpdate", (data) => {
 
 // عند بدء اللعبة (الانتقال لاختيار الحرف)
 socket.on("yourTurnToChoose", () => {
-  window.location.href = "choose-letter.html";
+  window.location.href = `choose-letter.html?room=${roomCode}`;
 });
 
 socket.on("waitingForPlayerToChoose", (data) => {
-  window.location.href = "choose-letter.html";
+  window.location.href = `choose-letter.html?room=${roomCode}`;
 });
 
 // مغادرة الغرفة
 leaveRoomBtn.addEventListener("click", () => {
   if (confirm("هل أنت متأكد من مغادرة الغرفة؟")) {
+    socket.emit("leaveRoom", { roomCode });
     window.location.href = "/";
   }
 });
@@ -133,12 +145,23 @@ socket.on("playerLeft", (data) => {
   updatePlayersList(data.players);
 });
 
+// عند طرد اللاعب من الغرفة (مثلاً عند حذف الغرفة)
+socket.on("roomClosed", () => {
+  alert("تم إغلاق الغرفة");
+  window.location.href = "/";
+});
+
 // إعادة الاتصال عند فقدان الاتصال
 socket.on("disconnect", () => {
   waitingMessage.textContent = "فقد الاتصال بالسيرفر... جاري إعادة الاتصال...";
   waitingMessage.classList.add("text-red-500");
+  waitingMessage.classList.remove("text-green-500", "font-bold");
 });
 
 socket.on("connect", () => {
   waitingMessage.classList.remove("text-red-500");
+  // إعادة الانضمام للغرفة بعد إعادة الاتصال
+  if (roomCode) {
+    socket.emit("joinRoom", { roomCode });
+  }
 });
