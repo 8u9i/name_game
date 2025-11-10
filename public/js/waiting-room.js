@@ -1,4 +1,3 @@
-
 // الاتصال بالسيرفر
 const socket = io();
 
@@ -29,12 +28,19 @@ let players = [];
 let lastRequestTime = 0;
 let isSocketConnected = false;
 let audioElement = null; // Reuse audio element to prevent memory leak
+let hasAttemptedJoin = false;
+
+// عرض رمز الغرفة
+roomCodeDisplay.textContent = roomCode;
 
 // Track socket connection
 socket.on('connect', () => {
   isSocketConnected = true;
   console.log('Socket connected');
   updateWaitingMessage('متصل بالسيرفر');
+
+  // انضمام/إعادة الانضمام للغرفة فور الاتصال
+  attemptJoinRoom();
 });
 
 socket.on('disconnect', () => {
@@ -45,6 +51,10 @@ socket.on('disconnect', () => {
 
 socket.on('error', (message) => {
   showError(message || 'حدث خطأ');
+  // أخطاء حرجة يجب إعادة التوجيه لها
+  if (message && /room not found|invalid room code/i.test(message)) {
+    setTimeout(() => (window.location.href = "/"), 1200);
+  }
 });
 
 socket.on('syncError', (message) => {
@@ -84,7 +94,7 @@ function playJoinSound() {
     // Reuse audio element to prevent memory leak
     if (!audioElement) {
       audioElement = new Audio(
-        "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzPLZjToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+"
+        "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzPLZjToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+"
       );
       audioElement.volume = AUDIO_VOLUME;
     }
@@ -95,8 +105,26 @@ function playJoinSound() {
   }
 }
 
-// عرض رمز الغرفة
-roomCodeDisplay.textContent = roomCode;
+// Attempt to join or rejoin the room
+function attemptJoinRoom() {
+  if (hasAttemptedJoin) return; // Prevent duplicate join attempts
+  hasAttemptedJoin = true;
+
+  // Get saved player name (must match the name used on the home page)
+  const storedName =
+    sessionStorage.getItem("playerName") ||
+    localStorage.getItem("playerName");
+
+  if (!storedName || storedName.trim().length < 2) {
+    showError("تعذر تحديد الاسم. الرجاء العودة للصفحة الرئيسية وإدخال الاسم.");
+    setTimeout(() => (window.location.href = "/"), 1400);
+    return;
+  }
+
+  // Send joinRoom with roomCode and playerName so server can treat it as a reconnection if applicable
+  socket.emit("joinRoom", { roomCode, playerName: storedName.trim() });
+  updateWaitingMessage("جاري الانضمام إلى الغرفة...");
+}
 
 // نسخ رمز الغرفة
 copyCodeBtn.addEventListener("click", () => {
@@ -130,7 +158,7 @@ readyBtn.addEventListener("click", () => {
     readyBtn.innerHTML = '<span class="truncate">✓ جاهز</span>';
     readyBtn.disabled = true;
 
-    // Fixed: Server doesn't expect roomCode parameter for playerReady
+    // Server doesn't expect roomCode parameter for playerReady
     socket.emit("playerReady");
   } catch (error) {
     console.error('Error in ready button:', error);
@@ -208,10 +236,25 @@ function updatePlayersList(playersList_data) {
 socket.on("joinedRoom", (data) => {
   try {
     if (data && data.players) {
+      updateWaitingListStateAfterJoin();
       updatePlayersList(data.players);
+      updateWaitingMessage("تم الانضمام إلى الغرفة. في انتظار بدء اللعبة...");
     }
   } catch (error) {
     console.error('Error handling joinedRoom:', error);
+  }
+});
+
+// عند إعادة انضمام لاعب (reconnect)
+socket.on("playerRejoined", (data) => {
+  try {
+    if (data && data.players) {
+      updatePlayersList(data.players);
+      // صوت اختياري عند عودة لاعب
+      playJoinSound();
+    }
+  } catch (error) {
+    console.error('Error handling playerRejoined:', error);
   }
 });
 
@@ -231,7 +274,6 @@ socket.on("playerJoined", (data) => {
 socket.on("playerReadyUpdate", (data) => {
   try {
     if (!data) return;
-    
     // Update individual player ready state
     const player = players.find(p => p.id === data.playerId);
     if (player) {
@@ -256,7 +298,6 @@ socket.on("gameStarting", () => {
 socket.on("newRoundPhase", (data) => {
   try {
     if (!data) return;
-    
     if (data.phase === 'choosing') {
       window.location.href = `choose-letter.html?room=${roomCode}`;
     }
@@ -287,6 +328,20 @@ socket.on("playerLeft", (data) => {
     console.error('Error handling playerLeft:', error);
   }
 });
+
+// Ensure UI states after successful join
+function updateWaitingListStateAfterJoin() {
+  try {
+    // Reset ready button state on page enter (server keeps true readiness)
+    isReady = false;
+    readyBtn.disabled = false;
+    readyBtn.classList.add("bg-primary");
+    readyBtn.classList.remove("bg-green-500");
+    readyBtn.innerHTML = '<span class="truncate">جاهز</span>';
+  } catch (e) {
+    // ignore
+  }
+}
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
