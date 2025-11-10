@@ -22,6 +22,9 @@ const readyBtn = document.getElementById("readyBtn");
 const waitingMessage = document.getElementById("waitingMessage");
 const leaveRoomBtn = document.getElementById("leaveRoomBtn");
 
+// قد يكون موجوداً في الصفحة، وإن لم يكن سنقوم بإنشائه ديناميكياً
+let startGameBtn = document.getElementById("startGameBtn");
+
 // البيانات المحلية
 let isReady = false;
 let players = [];
@@ -29,6 +32,9 @@ let lastRequestTime = 0;
 let isSocketConnected = false;
 let audioElement = null; // Reuse audio element to prevent memory leak
 let hasAttemptedJoin = false;
+
+// حالة جاهزية الغرفة (تُحدَّث من السيرفر)
+let lastRoomReadyStatus = { readyCount: 0, totalActive: 0, allReady: false };
 
 // عرض رمز الغرفة
 roomCodeDisplay.textContent = roomCode;
@@ -94,7 +100,7 @@ function playJoinSound() {
     // Reuse audio element to prevent memory leak
     if (!audioElement) {
       audioElement = new Audio(
-        "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzPLZjToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+"
+        "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuFzPLZjToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+zPLajToJHm7A7+OZUA0PVKzn77FgGwU7k9r0yHkpBSh+"
       );
       audioElement.volume = AUDIO_VOLUME;
     }
@@ -217,7 +223,7 @@ function updatePlayersList(playersList_data) {
     // تحديث رسالة الانتظار
     const readyCount = players.filter((p) => p && p.ready).length;
     if (readyCount === players.length && players.length >= 2) {
-      updateWaitingMessage("جميع اللاعبين جاهزون! اللعبة ستبدأ قريباً...");
+      updateWaitingMessage("جميع اللاعبين جاهزون! المضيف سيبدأ اللعبة.");
       waitingMessage.classList.add("text-green-500", "font-bold");
     } else if (players.length < 2) {
       updateWaitingMessage("في انتظار لاعب آخر على الأقل...");
@@ -226,10 +232,64 @@ function updatePlayersList(playersList_data) {
       updateWaitingMessage(`${readyCount}/${players.length} جاهزون`);
       waitingMessage.classList.remove("text-green-500", "font-bold");
     }
+
+    // بعد تحديث قائمة اللاعبين، حدّث حالة زر البدء
+    updateStartGameVisibilityAndState();
   } catch (error) {
     console.error('Error updating players list:', error);
     showError('خطأ في تحديث قائمة اللاعبين');
   }
+}
+
+// حساب هوية المضيف (نفترض أول لاعب في المصفوفة كما في منطق السيرفر)
+function getHostIdFromPlayers() {
+  return players && players.length > 0 ? players[0].id : null;
+}
+
+// إنشاء زر البدء إن لم يكن موجوداً
+function ensureStartButton() {
+  if (startGameBtn) return;
+
+  // حاول العثور على حاوية مناسبة لوضع الزر، وإلا ضعها بعد waitingMessage
+  const container = document.getElementById("controlsRow") || waitingMessage?.parentElement || document.body;
+
+  startGameBtn = document.createElement("button");
+  startGameBtn.id = "startGameBtn";
+  startGameBtn.className = "mt-3 bg-primary text-white px-4 py-2 rounded-lg hidden disabled:opacity-50 disabled:cursor-not-allowed";
+  startGameBtn.textContent = "بدء اللعبة (للمضيف)";
+
+  container.appendChild(startGameBtn);
+
+  startGameBtn.addEventListener("click", () => {
+    try {
+      if (!checkRateLimit()) return;
+      socket.emit("startGameRequest");
+    } catch (e) {
+      console.error("Error emitting startGameRequest:", e);
+      showError("تعذر بدء اللعبة");
+    }
+  });
+}
+
+// تحديث ظهور وحالة زر البدء بناء على كوني مضيفاً وحالة الجاهزية
+function updateStartGameVisibilityAndState() {
+  ensureStartButton();
+
+  const hostId = getHostIdFromPlayers();
+  const iAmHost = hostId && socket.id === hostId;
+
+  if (!iAmHost) {
+    // إخفاء الزر عن غير المضيف
+    startGameBtn.classList.add("hidden");
+    startGameBtn.disabled = true;
+    return;
+  }
+
+  // إظهار الزر للمضيف فقط
+  startGameBtn.classList.remove("hidden");
+
+  // تفعيل الزر فقط عندما يكون الجميع جاهزاً وعدد اللاعبين كافياً
+  startGameBtn.disabled = !lastRoomReadyStatus.allReady;
 }
 
 // عند الانضمام بنجاح
@@ -238,7 +298,7 @@ socket.on("joinedRoom", (data) => {
     if (data && data.players) {
       updateWaitingListStateAfterJoin();
       updatePlayersList(data.players);
-      updateWaitingMessage("تم الانضمام إلى الغرفة. في انتظار بدء اللعبة...");
+      updateWaitingMessage("تم الانضمام إلى الغرفة. بانتظار بدء اللعبة من المضيف...");
     }
   } catch (error) {
     console.error('Error handling joinedRoom:', error);
@@ -282,6 +342,43 @@ socket.on("playerReadyUpdate", (data) => {
     }
   } catch (error) {
     console.error('Error handling playerReadyUpdate:', error);
+  }
+});
+
+// يستقبل ملخص الجاهزية ويحدّث زر البدء
+socket.on("roomReadyStatus", (status) => {
+  try {
+    if (!status) return;
+    lastRoomReadyStatus = {
+      readyCount: Number(status.readyCount) || 0,
+      totalActive: Number(status.totalActive) || 0,
+      allReady: Boolean(status.allReady)
+    };
+
+    // تحديث الرسالة أيضاً
+    if (status.totalActive >= 2) {
+      if (status.allReady) {
+        updateWaitingMessage("جميع اللاعبين جاهزون! يمكن للمضيف بدء اللعبة الآن.");
+      } else {
+        updateWaitingMessage(`${status.readyCount}/${status.totalActive} جاهزون - بانتظار البقية.`);
+      }
+    } else {
+      updateWaitingMessage("في انتظار لاعب آخر على الأقل...");
+    }
+
+    updateStartGameVisibilityAndState();
+  } catch (e) {
+    console.error("Error handling roomReadyStatus:", e);
+  }
+});
+
+// استلام تغيير المضيف أثناء الجلسة (اختياري من السيرفر)
+socket.on("hostChanged", ({ newHostId }) => {
+  try {
+    // تحديث حالة الزر بناء على المضيف الجديد
+    updateStartGameVisibilityAndState();
+  } catch (e) {
+    console.error("Error handling hostChanged:", e);
   }
 });
 
