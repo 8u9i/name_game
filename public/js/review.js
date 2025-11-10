@@ -1,273 +1,209 @@
 const socket = io();
 
+// Constants
+const CATEGORIES = ["name", "plant", "animal", "thing", "country"];
+const RATE_LIMIT_DELAY = 1000;
+
 // عناصر الصفحة
 const roundTitle = document.getElementById("roundTitle");
-const votingMinutes = document.getElementById("votingMinutes");
-const votingSeconds = document.getElementById("votingSeconds");
-const votingCards = document.getElementById("votingCards");
 const answersTable = document.getElementById("answersTable");
 const nextRoundBtn = document.getElementById("nextRoundBtn");
 
 // البيانات المحلية
-let roundResults = null;
-let myVotes = new Map(); // playerId -> {name: true/false, ...}
-let votingTimer = 60; // 60 ثانية للتصويت
+let scoresData = null;
+let lastRequestTime = 0;
+let isSocketConnected = false;
+
+// Track socket connection
+socket.on('connect', () => {
+  isSocketConnected = true;
+  console.log('Socket connected');
+});
+
+socket.on('disconnect', () => {
+  isSocketConnected = false;
+  console.log('Socket disconnected');
+  showNotification('فقد الاتصال بالسيرفر');
+});
+
+socket.on('error', (message) => {
+  showNotification(message || 'حدث خطأ');
+});
+
+socket.on('syncError', (message) => {
+  showNotification(message || 'خطأ في المزامنة');
+});
+
+// Utility functions
+function checkRateLimit() {
+  const now = Date.now();
+  if (now - lastRequestTime < RATE_LIMIT_DELAY) {
+    showNotification('يرجى الانتظار قبل المحاولة مرة أخرى');
+    return false;
+  }
+  lastRequestTime = now;
+  return true;
+}
+
+function showNotification(message) {
+  try {
+    const notification = document.createElement("div");
+    notification.className =
+      "fixed top-4 left-1/2 transform -translate-x-1/2 bg-primary text-white px-6 py-3 rounded-lg shadow-lg z-50";
+    notification.textContent = message || 'إشعار';
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+      notification.remove();
+    }, 3000);
+  } catch (error) {
+    console.error('Error showing notification:', error);
+  }
+}
 
 // تحميل نتائج الجولة
-function loadRoundResults() {
-  const storedData = localStorage.getItem("roundResults");
-  if (storedData) {
-    roundResults = JSON.parse(storedData);
-    const letter = roundResults.letter;
-    roundTitle.textContent = `نتائج جولة حرف ${letter}`;
-    renderVotingCards();
-    renderAnswersTable();
-  }
-}
-
-// رسم بطاقات التصويت
-function renderVotingCards() {
-  votingCards.innerHTML = "";
-
-  roundResults.answers.forEach((playerData, index) => {
-    const card = document.createElement("div");
-    card.className =
-      index === 0
-        ? "rounded-xl border border-primary/50 bg-primary/10 dark:bg-primary/20 p-4 sm:p-6 shadow-lg"
-        : "rounded-xl border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800/50 p-4 sm:p-6 shadow";
-
-    const header = document.createElement("div");
-    header.className =
-      "flex items-center justify-between border-b border-primary/30 pb-4";
-
-    const title = document.createElement("h3");
-    title.className =
-      "text-lg font-bold text-neutral-800 dark:text-neutral-100";
-    title.textContent = `تصويت على إجابات ${playerData.playerName}`;
-
-    if (index === 0) {
-      const badge = document.createElement("span");
-      badge.className =
-        "rounded-full bg-secondary px-3 py-1 text-xs font-bold text-neutral-800";
-      badge.textContent = "الأسرع";
-      header.appendChild(title);
-      header.appendChild(badge);
-    } else {
-      header.appendChild(title);
-    }
-
-    card.appendChild(header);
-
-    // الإجابات
-    const answersDiv = document.createElement("div");
-    answersDiv.className = "py-4";
-
-    const dl = document.createElement("dl");
-    dl.className = "space-y-3";
-
-    const categories = [
-      { key: "name", label: "اسم" },
-      { key: "animal", label: "حيوان" },
-      { key: "plant", label: "نبات" },
-      { key: "thing", label: "جماد" },
-      { key: "country", label: "بلد" },
-    ];
-
-    categories.forEach((cat) => {
-      const answer = playerData.answers[cat.key];
-      if (!answer || answer.trim() === "") return;
-
-      const div = document.createElement("div");
-      div.className =
-        "flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-2";
-
-      const dt = document.createElement("dt");
-      dt.className =
-        "text-sm font-medium leading-normal text-neutral-600 dark:text-neutral-200";
-      dt.textContent = answer;
-
-      const dd = document.createElement("dd");
-      dd.className =
-        "flex items-center gap-2 text-sm leading-normal text-neutral-800 dark:text-neutral-100";
-
-      // زر الموافقة
-      const approveBtn = document.createElement("button");
-      approveBtn.className =
-        "flex h-8 w-8 items-center justify-center rounded-full bg-success/20 text-success transition-transform hover:scale-110";
-      approveBtn.innerHTML =
-        '<span class="material-symbols-outlined text-base">thumb_up</span>';
-      approveBtn.onclick = () =>
-        vote(playerData.playerId, cat.key, true, approveBtn, rejectBtn);
-
-      // زر الرفض
-      const rejectBtn = document.createElement("button");
-      rejectBtn.className =
-        "flex h-8 w-8 items-center justify-center rounded-full bg-danger/20 text-danger transition-transform hover:scale-110";
-      rejectBtn.innerHTML =
-        '<span class="material-symbols-outlined text-base">thumb_down</span>';
-      rejectBtn.onclick = () =>
-        vote(playerData.playerId, cat.key, false, approveBtn, rejectBtn);
-
-      dd.appendChild(approveBtn);
-      dd.appendChild(rejectBtn);
-
-      div.appendChild(dt);
-      div.appendChild(dd);
-      dl.appendChild(div);
-    });
-
-    answersDiv.appendChild(dl);
-    card.appendChild(answersDiv);
-    votingCards.appendChild(card);
-  });
-}
-
-// التصويت
-function vote(playerId, category, approve, approveBtn, rejectBtn) {
-  if (!myVotes.has(playerId)) {
-    myVotes.set(playerId, {});
-  }
-
-  const playerVotes = myVotes.get(playerId);
-  playerVotes[category] = approve;
-
-  // تحديث الأزرار
-  if (approve) {
-    approveBtn.classList.add("ring-2", "ring-success");
-    rejectBtn.classList.remove("ring-2", "ring-danger");
-  } else {
-    rejectBtn.classList.add("ring-2", "ring-danger");
-    approveBtn.classList.remove("ring-2", "ring-success");
-  }
-
-  // التحقق إذا انتهى التصويت
-  checkVotingComplete();
-}
-
-// التحقق من اكتمال التصويت
-function checkVotingComplete() {
-  let allVoted = true;
-
-  roundResults.answers.forEach((playerData) => {
-    const playerVotes = myVotes.get(playerData.playerId);
-    if (!playerVotes) {
-      allVoted = false;
+function loadScoresData() {
+  try {
+    const storedData = localStorage.getItem("scoresCalculated");
+    if (!storedData) {
+      showNotification('لا توجد بيانات النتائج');
       return;
     }
-
-    const categories = ["name", "animal", "plant", "thing", "country"];
-    categories.forEach((cat) => {
-      const answer = playerData.answers[cat];
-      if (answer && answer.trim() !== "" && playerVotes[cat] === undefined) {
-        allVoted = false;
-      }
-    });
-  });
-
-  if (allVoted) {
-    submitAllVotes();
+    
+    scoresData = JSON.parse(storedData);
+    
+    if (!scoresData || !scoresData.allAnswers) {
+      showNotification('بيانات النتائج غير صالحة');
+      return;
+    }
+    
+    renderAnswersTable();
+  } catch (error) {
+    console.error('Error loading scores data:', error);
+    showNotification('خطأ في تحميل بيانات النتائج');
   }
 }
 
-// إرسال جميع الأصوات
-function submitAllVotes() {
-  myVotes.forEach((votes, playerId) => {
-    socket.emit("voteAnswers", { playerId, votes });
-  });
-
-  nextRoundBtn.disabled = true;
-  nextRoundBtn.innerHTML = "<span>تم إرسال أصواتك! في انتظار الآخرين...</span>";
+// رسم جدول الإجابات (removed voting system - server doesn't implement it)
+function getCategoryLabel(category) {
+  const labels = {
+    name: "اسم",
+    plant: "نبات",
+    animal: "حيوان",
+    thing: "جماد",
+    country: "بلد"
+  };
+  return labels[category] || category;
 }
 
-// رسم جدول الإجابات
 function renderAnswersTable() {
-  answersTable.innerHTML = "";
+  try {
+    if (!scoresData || !scoresData.allAnswers) return;
+    
+    answersTable.innerHTML = "";
 
-  roundResults.answers.forEach((playerData, index) => {
-    const tr = document.createElement("tr");
-    tr.className = index === 0 ? "bg-primary/10 dark:bg-primary/20" : "";
+    scoresData.allAnswers.forEach((playerData, index) => {
+      if (!playerData) return;
+      
+      const tr = document.createElement("tr");
+      tr.className = index === 0 ? "bg-primary/10 dark:bg-primary/20" : "";
 
-    const nameCell = document.createElement("td");
-    nameCell.className =
-      "h-[72px] whitespace-nowrap px-4 py-2 text-sm font-bold text-neutral-800 dark:text-neutral-100";
-    nameCell.textContent =
-      index === 0 ? `${playerData.playerName} (الأول)` : playerData.playerName;
-    tr.appendChild(nameCell);
+      const nameCell = document.createElement("td");
+      nameCell.className =
+        "h-[72px] whitespace-nowrap px-4 py-2 text-sm font-bold text-neutral-800 dark:text-neutral-100";
+      nameCell.textContent = playerData.playerName || 'لاعب';
+      tr.appendChild(nameCell);
 
-    ["name", "animal", "plant", "thing", "country"].forEach((cat) => {
-      const cell = document.createElement("td");
-      cell.className =
-        "h-[72px] whitespace-nowrap px-4 py-2 text-sm font-normal text-neutral-600 dark:text-neutral-200";
-      cell.textContent = playerData.answers[cat] || "-";
-      tr.appendChild(cell);
-    });
+      CATEGORIES.forEach((cat) => {
+        const cell = document.createElement("td");
+        cell.className =
+          "h-[72px] whitespace-nowrap px-4 py-2 text-sm font-normal text-neutral-600 dark:text-neutral-200";
+        cell.textContent = (playerData.answers && playerData.answers[cat]) || "-";
+        tr.appendChild(cell);
+      });
 
-    const scoreCell = document.createElement("td");
-    scoreCell.className =
-      "h-[72px] whitespace-nowrap px-4 py-2 text-sm font-bold text-neutral-800 dark:text-neutral-100";
-    scoreCell.textContent = "0"; // سيتم تحديثها بعد التصويت
-    tr.appendChild(scoreCell);
-
-    answersTable.appendChild(tr);
-  });
-}
-
-// العد التنازلي للتصويت
-function startVotingTimer() {
-  const interval = setInterval(() => {
-    votingTimer--;
-
-    const minutes = Math.floor(votingTimer / 60);
-    const seconds = votingTimer % 60;
-
-    votingMinutes.textContent = minutes.toString().padStart(2, "0");
-    votingSeconds.textContent = seconds.toString().padStart(2, "0");
-
-    if (votingTimer <= 0) {
-      clearInterval(interval);
-      // إرسال الأصوات تلقائياً
-      if (myVotes.size > 0) {
-        submitAllVotes();
+      // Find score for this player from roundScores
+      let playerScore = 0;
+      if (scoresData.roundScores) {
+        const scoreEntry = scoresData.roundScores.find(s => s.playerId === playerData.playerId);
+        if (scoreEntry) {
+          playerScore = scoreEntry.score;
+        }
       }
-    }
-  }, 1000);
+
+      const scoreCell = document.createElement("td");
+      scoreCell.className =
+        "h-[72px] whitespace-nowrap px-4 py-2 text-sm font-bold text-neutral-800 dark:text-neutral-100";
+      scoreCell.textContent = playerScore;
+      tr.appendChild(scoreCell);
+
+      answersTable.appendChild(tr);
+    });
+  } catch (error) {
+    console.error('Error rendering answers table:', error);
+    showNotification('خطأ في عرض الإجابات');
+  }
 }
-
-// عند حساب النقاط
-socket.on("scoresCalculated", (data) => {
-  // تحديث الجدول بالنقاط
-  data.roundScores.forEach(({ playerId, score }) => {
-    const playerIndex = roundResults.answers.findIndex(
-      (p) => p.playerId === playerId
-    );
-    if (playerIndex !== -1) {
-      const row = answersTable.children[playerIndex];
-      const scoreCell = row.lastElementChild;
-      scoreCell.textContent = score;
-    }
-  });
-
-  nextRoundBtn.disabled = false;
-  nextRoundBtn.innerHTML =
-    '<span>الجولة التالية</span><span class="material-symbols-outlined">arrow_back</span>';
-});
 
 // الانتقال للجولة التالية
 nextRoundBtn.addEventListener("click", () => {
-  // سيتم التعامل معه من السيرفر
+  try {
+    if (!isSocketConnected) {
+      showNotification('لا يوجد اتصال بالسيرفر');
+      return;
+    }
+    
+    if (!checkRateLimit()) return;
+
+    // Send finishedReviewing event to server
+    socket.emit('finishedReviewing');
+    
+    nextRoundBtn.disabled = true;
+    nextRoundBtn.innerHTML = '<span>في انتظار اللاعبين الآخرين...</span>';
+  } catch (error) {
+    console.error('Error in next round button:', error);
+    showNotification('حدث خطأ');
+  }
 });
 
-// عند بدء الجولة التالية
-socket.on("nextRound", () => {
-  window.location.href = "choose-letter.html";
+// Handle new round phase
+socket.on("newRoundPhase", (data) => {
+  try {
+    if (!data) return;
+    
+    if (data.phase === 'choosing') {
+      window.location.href = "choose-letter.html";
+    }
+  } catch (error) {
+    console.error('Error handling newRoundPhase:', error);
+  }
 });
 
 // عند انتهاء اللعبة
 socket.on("gameEnded", (data) => {
-  localStorage.setItem("finalResults", JSON.stringify(data));
-  window.location.href = "final-results.html";
+  try {
+    if (!data) return;
+    
+    localStorage.setItem("finalResults", JSON.stringify(data));
+    window.location.href = "final-results.html";
+  } catch (error) {
+    console.error('Error handling gameEnded:', error);
+  }
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  try {
+    // Clean up any timers or listeners
+  } catch (error) {
+    console.error('Error cleaning up:', error);
+  }
 });
 
 // تهيئة الصفحة
-loadRoundResults();
-startVotingTimer();
+try {
+  loadScoresData();
+} catch (error) {
+  console.error('Error initializing page:', error);
+  showNotification('خطأ في تهيئة الصفحة');
+}
