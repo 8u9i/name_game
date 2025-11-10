@@ -568,7 +568,7 @@ function handlePlayerLeave(socketId) {
     
     // If everyone remaining has submitted, end the round
     if (room.status === "playing") {
-      const allRemaining Submitted = room.players.every(p => room.submittedPlayers.has(p.id));
+      const allRemainingSubmitted = room.players.every(p => room.submittedPlayers.has(p.id));
       if (allRemainingSubmitted) {
         endRound(roomCode);
       }
