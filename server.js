@@ -3,7 +3,7 @@ const app = express();
 const http = require("http").createServer(app);
 const io = require("socket.io")(http, {
   cors: {
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ["http://localhost:3000"],
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : ["http://localhost:3000"],
     methods: ["GET", "POST"]
   },
   pingTimeout: 60000,
@@ -15,42 +15,43 @@ const rateLimiter = new Map();
 const RATE_LIMIT_WINDOW = 1000; // 1 second
 const MAX_REQUESTS_PER_WINDOW = 10;
 
+// Constants
+const MAX_ROOM_CODE_ATTEMPTS = 10;
+const MAX_PLAYER_NAME_LENGTH = 20;
+const MAX_ANSWER_LENGTH = 50;
+const VALID_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const MIN_PLAYERS_TO_START = 2;
+const MAX_PLAYERS_PER_ROOM = 6;
+const CATEGORIES = ["name", "plant", "animal", "thing", "country"];
+const ROOM_EMPTY_GRACE_MS = 30000; // Grace period for rooms after game end
+const WAITING_ROOM_IDLE_TIMEOUT = parseInt(process.env.WAITING_ROOM_IDLE_TIMEOUT || "600000", 10); // 10 min default
+
 app.use(express.static("public"));
 
 // Security headers
 app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
   next();
 });
 
 const rooms = new Map();
 const players = new Map();
 
-// Constants
-const MAX_ROOM_CODE_ATTEMPTS = 10;
-const MAX_PLAYER_NAME_LENGTH = 20;
-const MAX_ANSWER_LENGTH = 50;
-const VALID_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-const MIN_PLAYERS_TO_START = 2;
-const MAX_PLAYERS_PER_ROOM = 6;
-const CATEGORIES = ["name", "plant", "animal", "thing", "country"];
-const ROOM_EMPTY_GRACE_MS = 30000; // 30s grace before deleting a room with no connected players
-
-// Utility Functions
+// --- Utility Functions ---
 function sanitizeInput(input) {
-  if (typeof input !== 'string') return '';
-  return input.trim().replace(/[<>\"'&]/g, '').substring(0, MAX_ANSWER_LENGTH);
+  if (typeof input !== "string") return "";
+  return input.trim().replace(/[<>\"'&]/g, "").substring(0, MAX_ANSWER_LENGTH);
 }
 
 function sanitizeName(name) {
-  if (typeof name !== 'string') return '';
-  return name.trim().replace(/[<>\"'&]/g, '').substring(0, MAX_PLAYER_NAME_LENGTH);
+  if (typeof name !== "string") return "";
+  return name.trim().replace(/[<>\"'&]/g, "").substring(0, MAX_PLAYER_NAME_LENGTH);
 }
 
 function isValidLetter(letter) {
-  return typeof letter === 'string' && VALID_LETTERS.includes(letter.toUpperCase());
+  return typeof letter === "string" && VALID_LETTERS.includes(letter.toUpperCase());
 }
 
 function generateRoomCode() {
@@ -70,10 +71,10 @@ function generateRoomCode() {
 function checkRateLimit(socketId) {
   const now = Date.now();
   const userRequests = rateLimiter.get(socketId) || [];
-  const recentRequests = userRequests.filter(time => now - time < RATE_LIMIT_WINDOW);
-  if (recentRequests.length >= MAX_REQUESTS_PER_WINDOW) return false;
-  recentRequests.push(now);
-  rateLimiter.set(socketId, recentRequests);
+  const recent = userRequests.filter(t => now - t < RATE_LIMIT_WINDOW);
+  if (recent.length >= MAX_REQUESTS_PER_WINDOW) return false;
+  recent.push(now);
+  rateLimiter.set(socketId, recent);
   return true;
 }
 
@@ -84,43 +85,61 @@ function clearTimer(room) {
   }
 }
 
-function cleanupRoom(roomCode) {
-  const room = rooms.get(roomCode);
-  if (room) {
-    clearTimer(room);
-    if (room.deletionTimer) {
-      clearTimeout(room.deletionTimer);
-      room.deletionTimer = null;
+function scheduleIdleDeletion(room) {
+  if (room.status !== "waiting") return;
+  const connectedCount = room.players.filter(p => !p.disconnected).length;
+  if (connectedCount > 0) return; // Don't schedule if someone still connected
+  if (room.idleTimer) return;     // Already scheduled
+
+  room.idleTimer = setTimeout(() => {
+    const stillRoom = rooms.get(room.code);
+    if (!stillRoom) return;
+    const active = stillRoom.players.filter(p => !p.disconnected).length;
+    if (active === 0 && stillRoom.status === "waiting") {
+      console.log(`🕒 Waiting room '${room.code}' idle timeout reached. Deleting room.`);
+      cleanupRoom(room.code);
+    } else {
+      // Someone reconnected
+      if (stillRoom.idleTimer) {
+        clearTimeout(stillRoom.idleTimer);
+        stillRoom.idleTimer = null;
+      }
     }
-    room.players.forEach(player => {
-      if (player.id) players.delete(player.id);
-    });
-    rooms.delete(roomCode);
-    console.log(`🗑️ Room '${roomCode}' cleaned up completely.`);
-  }
+  }, WAITING_ROOM_IDLE_TIMEOUT);
 }
 
+function cleanupRoom(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+  clearTimer(room);
+  if (room.deletionTimer) {
+    clearTimeout(room.deletionTimer);
+    room.deletionTimer = null;
+  }
+  if (room.idleTimer) {
+    clearTimeout(room.idleTimer);
+    room.idleTimer = null;
+  }
+  room.players.forEach(p => {
+    if (p.id) players.delete(p.id);
+  });
+  rooms.delete(roomCode);
+  console.log(`🗑️ Room '${roomCode}' fully cleaned up.`);
+}
+
+// --- Socket Logic ---
 io.on("connection", (socket) => {
   console.log("A new player connected:", socket.id);
 
-  // === ROOM CREATION ===
+  // Create Room
   socket.on("createRoom", (playerName) => {
-    if (!checkRateLimit(socket.id)) {
-      return socket.emit("error", "Too many requests. Please slow down.");
-    }
-
+    if (!checkRateLimit(socket.id)) return socket.emit("error", "Too many requests.");
     const sanitizedName = sanitizeName(playerName);
-    if (!sanitizedName || sanitizedName.length < 2) {
-      return socket.emit("error", "Player name must be between 2-20 characters.");
-    }
+    if (!sanitizedName || sanitizedName.length < 2) return socket.emit("error", "Player name must be 2-20 chars.");
+    if (players.has(socket.id)) return socket.emit("error", "You are already in a room.");
 
-    if (players.has(socket.id)) {
-      return socket.emit("error", "You are already in a room.");
-    }
-
-    console.log(`🎮 Player '${sanitizedName}' (${socket.id}) is creating a room.`);
     const roomCode = generateRoomCode();
-    const newPlayer = {
+    const player = {
       id: socket.id,
       name: sanitizedName,
       score: 0,
@@ -131,7 +150,7 @@ io.on("connection", (socket) => {
     const room = {
       code: roomCode,
       host: socket.id,
-      players: [newPlayer],
+      players: [player],
       status: "waiting",
       currentRound: 0,
       maxRounds: 5,
@@ -141,128 +160,125 @@ io.on("connection", (socket) => {
       timerInterval: null,
       letterChooserIndex: 0,
       submittedPlayers: new Set(),
-      deletionTimer: null
+      deletionTimer: null,
+      idleTimer: null
     };
     rooms.set(roomCode, room);
     players.set(socket.id, { roomCode, name: sanitizedName });
     socket.join(roomCode);
-    socket.emit("roomCreated", { roomCode, player: newPlayer });
-    console.log(`✅ Room '${roomCode}' created by '${sanitizedName}'. Total rooms: ${rooms.size}`);
+    socket.emit("roomCreated", { roomCode, player });
+    console.log(`✅ Room '${roomCode}' created by '${sanitizedName}'.`);
   });
 
-  // === JOINING / REJOINING A ROOM ===
+  // Join / Rejoin Room
   socket.on("joinRoom", ({ roomCode, playerName }) => {
-    if (!checkRateLimit(socket.id)) {
-      return socket.emit("error", "Too many requests. Please slow down.");
-    }
-
-    const sanitizedName = sanitizeName(playerName);
-    const sanitizedRoomCode = typeof roomCode === 'string' ? roomCode.trim().toUpperCase() : '';
-
-    if (!sanitizedRoomCode) return socket.emit("error", "Invalid room code.");
-    if (!sanitizedName || sanitizedName.length < 2) return socket.emit("error", "Player name must be between 2-20 characters.");
-
-    const room = rooms.get(sanitizedRoomCode);
+    if (!checkRateLimit(socket.id)) return socket.emit("error", "Too many requests.");
+    const name = sanitizeName(playerName);
+    const code = typeof roomCode === "string" ? roomCode.trim().toUpperCase() : "";
+    if (!code) return socket.emit("error", "Invalid room code.");
+    if (!name || name.length < 2) return socket.emit("error", "Player name must be 2-20 chars.");
+    const room = rooms.get(code);
     if (!room) return socket.emit("error", "Room not found.");
 
-    // Reconnection takes priority (allowed regardless of room status)
-    const existingPlayer = room.players.find(p => p.name === sanitizedName);
+    // Reconnection allowed regardless of status (waiting or in-game)
+    const existingPlayer = room.players.find(p => p.name === name);
     if (existingPlayer) {
-      console.log(`🔄 Player '${sanitizedName}' is reconnecting to room '${sanitizedRoomCode}'.`);
-      const oldSocketId = existingPlayer.id;
+      console.log(`🔄 Player '${name}' reconnecting to room '${code}'.`);
+      const oldId = existingPlayer.id;
       existingPlayer.id = socket.id;
       existingPlayer.disconnected = false;
-
-      // Cancel pending room deletion if any
-      if (room.deletionTimer) {
-        clearTimeout(room.deletionTimer);
-        room.deletionTimer = null;
+      if (oldId) players.delete(oldId);
+      players.set(socket.id, { roomCode: code, name });
+      socket.join(code);
+      // Cancel idle deletion if scheduled
+      if (room.idleTimer) {
+        clearTimeout(room.idleTimer);
+        room.idleTimer = null;
       }
-
-      if (oldSocketId) players.delete(oldSocketId);
-      players.set(socket.id, { roomCode: sanitizedRoomCode, name: sanitizedName });
-
-      socket.join(sanitizedRoomCode);
-      socket.emit("joinedRoom", { roomCode: sanitizedRoomCode, player: existingPlayer, players: room.players });
-      socket.broadcast.to(sanitizedRoomCode).emit("playerRejoined", { player: existingPlayer, players: room.players });
-
-      console.log(`✅ '${sanitizedName}' reconnected to room '${sanitizedRoomCode}'.`);
+      socket.emit("joinedRoom", { roomCode: code, player: existingPlayer, players: room.players });
+      socket.broadcast.to(code).emit("playerRejoined", { player: existingPlayer, players: room.players });
       return;
     }
 
-    // New join (only allowed while waiting)
+    // New join only allowed while waiting
     if (room.status !== "waiting") return socket.emit("error", "The game has already started.");
-    if (room.players.length >= MAX_PLAYERS_PER_ROOM) return socket.emit("error", "The room is full.");
-    const isNameTaken = room.players.some(p => p.name === sanitizedName);
-    if (isNameTaken) return socket.emit("error", "This name is already taken in this room.");
+    if (room.players.length >= MAX_PLAYERS_PER_ROOM) return socket.emit("error", "Room is full.");
+    if (room.players.some(p => p.name === name)) return socket.emit("error", "Name already taken.");
 
     const newPlayer = {
       id: socket.id,
-      name: sanitizedName,
+      name,
       score: 0,
       ready: false,
       finishedReviewing: false,
       disconnected: false
     };
     room.players.push(newPlayer);
-    players.set(socket.id, { roomCode: sanitizedRoomCode, name: sanitizedName });
-    socket.join(sanitizedRoomCode);
-    socket.emit("joinedRoom", { roomCode: sanitizedRoomCode, player: newPlayer, players: room.players });
-    socket.broadcast.to(sanitizedRoomCode).emit("playerJoined", { player: newPlayer, players: room.players });
-    console.log(`✅ '${sanitizedName}' joined room '${sanitizedRoomCode}'. Players: ${room.players.length}`);
+    players.set(socket.id, { roomCode: code, name });
+    socket.join(code);
+    socket.emit("joinedRoom", { roomCode: code, player: newPlayer, players: room.players });
+    socket.broadcast.to(code).emit("playerJoined", { player: newPlayer, players: room.players });
+    // Cancel idle deletion if any (room is active again)
+    if (room.idleTimer) {
+      clearTimeout(room.idleTimer);
+      room.idleTimer = null;
+    }
   });
 
-  // === PLAYER READY STATE ===
+  // Player ready toggle (no auto-start)
   socket.on("playerReady", () => {
     if (!checkRateLimit(socket.id)) return;
     const validation = validatePlayerAndRoom(socket.id);
     if (!validation.isValid) return socket.emit("syncError", validation.message);
     const { room, player } = validation;
-
-    if (room.status !== "waiting") {
-      return socket.emit("syncError", "Cannot change ready state after game starts.");
-    }
+    if (room.status !== "waiting") return socket.emit("syncError", "Game already started.");
 
     player.ready = !player.ready;
-    io.to(room.code).emit("playerReadyUpdate", {
-      playerId: socket.id,
-      isReady: player.ready
-    });
-    console.log(`👍 '${player.name}' is now ${player.ready ? 'ready' : 'not ready'}.`);
+    io.to(room.code).emit("playerReadyUpdate", { playerId: player.id, isReady: player.ready });
 
-    const allReady = room.players.filter(p => !p.disconnected).every(p => p.ready);
-    const activeCount = room.players.filter(p => !p.disconnected).length;
-    if (allReady && activeCount >= MIN_PLAYERS_TO_START) {
-      startGame(room.code);
-    }
+    // Inform room of readiness summary
+    const activePlayers = room.players.filter(p => !p.disconnected);
+    const readyCount = activePlayers.filter(p => p.ready).length;
+    io.to(room.code).emit("roomReadyStatus", {
+      readyCount,
+      totalActive: activePlayers.length,
+      allReady: readyCount === activePlayers.length && activePlayers.length >= MIN_PLAYERS_TO_START
+    });
   });
 
-  // === LETTER SELECTION ===
-  socket.on("letterChosen", (letter) => {
+  // Manual start request by host
+  socket.on("startGameRequest", () => {
     if (!checkRateLimit(socket.id)) return;
-
     const validation = validatePlayerAndRoom(socket.id);
     if (!validation.isValid) return socket.emit("syncError", validation.message);
     const { room, player } = validation;
+    if (room.status !== "waiting") return socket.emit("syncError", "Game already started.");
+    if (room.host !== player.id) return socket.emit("syncError", "Only host can start the game.");
 
-    if (room.status !== "choosing") {
-      return socket.emit("syncError", "Not in letter choosing phase.");
-    }
+    const activePlayers = room.players.filter(p => !p.disconnected);
+    if (activePlayers.length < MIN_PLAYERS_TO_START) return socket.emit("syncError", "Not enough players to start.");
+    const allReady = activePlayers.every(p => p.ready);
+    if (!allReady) return socket.emit("syncError", "All players must be ready before starting.");
+
+    startGame(room.code);
+  });
+
+  // Letter selection
+  socket.on("letterChosen", (letter) => {
+    if (!checkRateLimit(socket.id)) return;
+    const validation = validatePlayerAndRoom(socket.id);
+    if (!validation.isValid) return socket.emit("syncError", validation.message);
+    const { room, player } = validation;
+    if (room.status !== "choosing") return socket.emit("syncError", "Not in choosing phase.");
 
     const chooser = room.players[room.letterChooserIndex % room.players.length];
-    if (socket.id !== chooser.id) {
-      console.log(`⚠️ Security: '${player.name}' tried to choose a letter out of turn.`);
-      return socket.emit("syncError", "It's not your turn to choose.");
-    }
+    if (chooser.id !== player.id) return socket.emit("syncError", "Not your turn.");
 
-    if (!isValidLetter(letter)) return socket.emit("syncError", "Invalid letter selected.");
-
-    const upperLetter = letter.toUpperCase();
-    room.currentLetter = upperLetter;
+    if (!isValidLetter(letter)) return socket.emit("syncError", "Invalid letter.");
+    room.currentLetter = letter.toUpperCase();
     room.status = "playing";
     room.submittedPlayers.clear();
 
-    console.log(`🔤 Letter '${upperLetter}' was chosen for room '${room.code}'.`);
     io.to(room.code).emit("gameStarted", {
       letter: room.currentLetter,
       round: room.currentRound,
@@ -271,61 +287,46 @@ io.on("connection", (socket) => {
     startTimer(room.code);
   });
 
-  // === ANSWER SUBMISSION ===
+  // Submit answers
   socket.on("submitAnswers", (answers) => {
     if (!checkRateLimit(socket.id)) return;
-
     const validation = validatePlayerAndRoom(socket.id);
     if (!validation.isValid) return socket.emit("syncError", validation.message);
     const { room, player } = validation;
-
-    if (room.status !== "playing") {
-      return socket.emit("syncError", "Not in playing phase.");
-    }
-
-    if (room.submittedPlayers.has(socket.id)) {
-      return socket.emit("syncError", "You already submitted your answers.");
-    }
+    if (room.status !== "playing") return socket.emit("syncError", "Not in playing phase.");
+    if (room.submittedPlayers.has(player.id)) return socket.emit("syncError", "Already submitted.");
 
     const sanitizedAnswers = {};
-    if (typeof answers === 'object' && answers !== null) {
-      CATEGORIES.forEach(category => {
-        if (answers[category]) sanitizedAnswers[category] = sanitizeInput(answers[category]);
+    if (answers && typeof answers === "object") {
+      CATEGORIES.forEach(cat => {
+        if (answers[cat]) sanitizedAnswers[cat] = sanitizeInput(answers[cat]);
       });
     }
+    room.answers.set(player.id, sanitizedAnswers);
+    room.submittedPlayers.add(player.id);
 
-    room.answers.set(socket.id, sanitizedAnswers);
-    room.submittedPlayers.add(socket.id);
+    const activePlayers = room.players.filter(p => !p.disconnected);
+    io.to(room.code).emit("playerSubmitted", { playerId: player.id });
 
-    const activeCount = room.players.filter(p => !p.disconnected).length;
-    console.log(`📝 '${player.name}' submitted answers. (${room.submittedPlayers.size}/${activeCount})`);
-
-    io.to(room.code).emit("playerSubmitted", { playerId: socket.id });
-
-    if (room.submittedPlayers.size === activeCount) {
+    if (room.submittedPlayers.size === activePlayers.length) {
       endRound(room.code);
     }
   });
 
-  // === PLAYER FINISHED REVIEWING SCORES ===
-  socket.on('finishedReviewing', () => {
+  // Review phase finish
+  socket.on("finishedReviewing", () => {
     if (!checkRateLimit(socket.id)) return;
-
     const validation = validatePlayerAndRoom(socket.id);
     if (!validation.isValid) return socket.emit("syncError", validation.message);
     const { room, player } = validation;
-
-    if (room.status !== "reviewing") {
-      return socket.emit("syncError", "Not in reviewing phase.");
-    }
+    if (room.status !== "reviewing") return socket.emit("syncError", "Not in reviewing phase.");
 
     player.finishedReviewing = true;
-    const allFinished = room.players.filter(p => !p.disconnected).every(p => p.finishedReviewing);
+    const activePlayers = room.players.filter(p => !p.disconnected);
+    const allFinished = activePlayers.every(p => p.finishedReviewing);
 
     if (allFinished) {
-      console.log(`✅ All players in '${room.code}' are ready for the next round.`);
-      room.players.forEach(p => p.finishedReviewing = false);
-
+      activePlayers.forEach(p => p.finishedReviewing = false);
       if (room.currentRound < room.maxRounds) {
         nextRound(room.code);
       } else {
@@ -334,72 +335,57 @@ io.on("connection", (socket) => {
     }
   });
 
-  // === DISCONNECTION / LEAVING ===
+  // Disconnect / leave
   socket.on("disconnect", () => {
     handlePlayerLeave(socket.id);
     rateLimiter.delete(socket.id);
   });
-
   socket.on("leaveRoom", () => {
     handlePlayerLeave(socket.id);
   });
 });
 
-// --- Validation Helper Function ---
+// --- Validation Helper ---
 function validatePlayerAndRoom(socketId) {
   const playerData = players.get(socketId);
-  if (!playerData) {
-    return { isValid: false, message: "Your session has expired. Please rejoin." };
-  }
-
+  if (!playerData) return { isValid: false, message: "Session expired." };
   const room = rooms.get(playerData.roomCode);
   if (!room) {
     players.delete(socketId);
-    return { isValid: false, message: "The room you were in no longer exists." };
+    return { isValid: false, message: "Room no longer exists." };
   }
-
   const player = room.players.find(p => p.id === socketId);
   if (!player) {
     players.delete(socketId);
-    return { isValid: false, message: "You are no longer part of this room." };
+    return { isValid: false, message: "You are no longer in this room." };
   }
-
   return { isValid: true, room, player, playerData };
 }
 
-// --- Game Logic Functions ---
+// --- Game Logic ---
 function startGame(roomCode) {
   const room = rooms.get(roomCode);
   if (!room || room.status !== "waiting") return;
-
-  console.log(`🚀 Starting game in room '${roomCode}'!`);
+  console.log(`🚀 Starting game in room '${roomCode}'.`);
   room.status = "choosing";
   room.currentRound = 1;
   room.letterChooserIndex = 0;
-  room.players.forEach(p => {
-    p.score = 0;
-    p.finishedReviewing = false;
-  });
-
-  io.to(roomCode).emit('gameStarting');
+  room.players.forEach(p => { p.score = 0; p.finishedReviewing = false; });
+  io.to(roomCode).emit("gameStarting");
   chooseLetterPhase(roomCode);
 }
 
 function chooseLetterPhase(roomCode) {
   const room = rooms.get(roomCode);
   if (!room) return;
-
   clearTimer(room);
   room.answers.clear();
   room.submittedPlayers.clear();
   room.timer = 60;
-  room.status = 'choosing';
-
+  room.status = "choosing";
   const chooser = room.players[room.letterChooserIndex % room.players.length];
-  console.log(`👉 It's '${chooser.name}'s turn to choose a letter in room '${room.code}'.`);
-
-  io.to(roomCode).emit('newRoundPhase', {
-    phase: 'choosing',
+  io.to(roomCode).emit("newRoundPhase", {
+    phase: "choosing",
     chooserName: chooser.name,
     chooserId: chooser.id,
     round: room.currentRound
@@ -409,14 +395,11 @@ function chooseLetterPhase(roomCode) {
 function startTimer(roomCode) {
   const room = rooms.get(roomCode);
   if (!room) return;
-
   clearTimer(room);
   room.timer = 60;
-
   room.timerInterval = setInterval(() => {
     room.timer--;
     io.to(roomCode).emit("timerUpdate", room.timer);
-
     if (room.timer <= 0) {
       clearTimer(room);
       endRound(roomCode);
@@ -426,34 +409,28 @@ function startTimer(roomCode) {
 
 function endRound(roomCode) {
   const room = rooms.get(roomCode);
-  if (!room || room.status === 'reviewing' || room.status === 'finished') return;
-
-  console.log(`⏰ Round ${room.currentRound} ended in room '${roomCode}'.`);
+  if (!room || room.status === "reviewing" || room.status === "finished") return;
   room.status = "reviewing";
   clearTimer(room);
-
-  room.players.forEach(player => {
-    if (!room.answers.has(player.id) && !player.disconnected) {
-      room.answers.set(player.id, {});
+  room.players.forEach(p => {
+    if (!room.answers.has(p.id) && !p.disconnected) {
+      room.answers.set(p.id, {});
     }
   });
-
   calculateScores(roomCode);
 }
 
 function calculateScores(roomCode) {
   const room = rooms.get(roomCode);
   if (!room) return;
-
   const roundScores = new Map();
   room.players.forEach(p => roundScores.set(p.id, 0));
 
   CATEGORIES.forEach(category => {
     const categoryAnswers = new Map();
-
     room.answers.forEach((answers, playerId) => {
       const answer = answers[category]?.trim().toLowerCase();
-      if (answer && answer.length > 0) {
+      if (answer) {
         const firstChar = answer.charAt(0).toUpperCase();
         if (firstChar === room.currentLetter) {
           if (!categoryAnswers.has(answer)) categoryAnswers.set(answer, []);
@@ -461,15 +438,12 @@ function calculateScores(roomCode) {
         }
       }
     });
-
-    categoryAnswers.forEach((playerIds) => {
+    categoryAnswers.forEach(playerIds => {
       if (playerIds.length === 1) {
         const pid = playerIds[0];
         roundScores.set(pid, roundScores.get(pid) + 10);
       } else {
-        playerIds.forEach(pid => {
-          roundScores.set(pid, roundScores.get(pid) + 5);
-        });
+        playerIds.forEach(pid => roundScores.set(pid, roundScores.get(pid) + 5));
       }
     });
   });
@@ -485,51 +459,41 @@ function calculateScores(roomCode) {
     answers
   }));
 
-  console.log(`📊 Scores calculated for room '${roomCode}'.`);
   io.to(roomCode).emit("scoresCalculated", {
     allAnswers,
     roundScores: Array.from(roundScores.entries()).map(([id, score]) => ({ playerId: id, score })),
-    totalScores: room.players.map(p => ({ playerId: p.id, name: p.name, score: p.score })),
+    totalScores: room.players.map(p => ({ playerId: p.id, name: p.name, score: p.score }))
   });
 }
 
 function nextRound(roomCode) {
   const room = rooms.get(roomCode);
   if (!room) return;
-
   room.currentRound++;
   room.letterChooserIndex++;
-  console.log(`➡️  Starting next round (${room.currentRound}) for room '${roomCode}'.`);
   chooseLetterPhase(roomCode);
 }
 
 function endGame(roomCode) {
   const room = rooms.get(roomCode);
-  if (!room || room.status === 'finished') return;
-
+  if (!room || room.status === "finished") return;
   room.status = "finished";
   clearTimer(room);
-
-  const sortedPlayers = [...room.players].sort((a, b) => b.score - a.score);
-  console.log(`🏆 Game ended in room '${roomCode}'. Winner: ${sortedPlayers[0]?.name}`);
-
+  const sorted = [...room.players].sort((a, b) => b.score - a.score);
   io.to(roomCode).emit("gameEnded", {
-    winner: sortedPlayers[0],
-    rankings: sortedPlayers,
+    winner: sorted[0],
+    rankings: sorted
   });
-
-  setTimeout(() => {
+  room.deletionTimer = setTimeout(() => {
     cleanupRoom(roomCode);
-  }, 30 * 1000);
+  }, ROOM_EMPTY_GRACE_MS);
 }
 
 function handlePlayerLeave(socketId) {
   const playerData = players.get(socketId);
   if (!playerData) return;
-
   const { roomCode, name } = playerData;
   const room = rooms.get(roomCode);
-
   players.delete(socketId);
   if (!room) return;
 
@@ -538,81 +502,69 @@ function handlePlayerLeave(socketId) {
 
   console.log(`👋 Player '${name}' (${socketId}) left room '${roomCode}'.`);
 
-  // If this was the last connected player, do NOT delete immediately.
-  // Mark as disconnected and schedule a room deletion grace period.
-  const connectedCountBefore = room.players.filter(p => !p.disconnected).length;
-
-  if (connectedCountBefore === 1) {
+  // Mark disconnected instead of removing if still waiting
+  if (room.status === "waiting") {
     player.disconnected = true;
-    player.id = null; // clear old socket id
-    // Transfer host if needed when they reconnect; for now keep host as-is.
-
-    // Schedule room deletion after a grace period if nobody reconnects
-    if (room.deletionTimer) clearTimeout(room.deletionTimer);
-    room.deletionTimer = setTimeout(() => {
-      console.log(`🕒 No one reconnected to room '${roomCode}' during grace period. Deleting room.`);
-      cleanupRoom(roomCode);
-    }, ROOM_EMPTY_GRACE_MS);
-
+    player.id = null; // release old socket id
     io.to(roomCode).emit("playerLeft", {
       playerId: socketId,
       playerName: name,
       players: room.players,
-      newHostId: room.host,
+      newHostId: room.host
     });
+
+    // If host disconnected, keep host assignment (they can reclaim on reconnect)
+    const connectedCount = room.players.filter(p => !p.disconnected).length;
+    if (connectedCount === 0) {
+      scheduleIdleDeletion(room);
+    }
     return;
   }
 
-  // Otherwise, remove the player from the room immediately
-  room.players = room.players.filter((p) => p !== player);
+  // In-game: remove player entirely
+  room.players = room.players.filter(p => p !== player);
+  io.to(roomCode).emit("playerLeft", {
+    playerId: socketId,
+    playerName: name,
+    players: room.players,
+    newHostId: room.host
+  });
 
   if (room.players.length === 0) {
-    // Fallback safety: should rarely happen due to branch above
     cleanupRoom(roomCode);
-  } else {
-    if (room.host === socketId) {
-      room.host = room.players[0].id;
-      console.log(`👑 '${room.players[0].name}' is the new host of room '${roomCode}'.`);
-    }
+    return;
+  }
 
-    io.to(roomCode).emit("playerLeft", {
-      playerId: socketId,
-      playerName: name,
-      players: room.players,
-      newHostId: room.host,
+  if (room.host === socketId) {
+    room.host = room.players[0].id;
+    console.log(`👑 '${room.players[0].name}' is the new host of room '${roomCode}'.`);
+    io.to(roomCode).emit("hostChanged", { newHostId: room.host });
+  }
+
+  if (room.status === "playing") {
+    const activePlayers = room.players.filter(p => !p.disconnected);
+    const allSubmitted = activePlayers.every(p => room.submittedPlayers.has(p.id));
+    if (allSubmitted && activePlayers.length > 0) endRound(roomCode);
+  }
+
+  if (room.status === "waiting") {
+    const activeReady = room.players.filter(p => !p.disconnected).every(p => p.ready);
+    const activeCount = room.players.filter(p => !p.disconnected).length;
+    io.to(roomCode).emit("roomReadyStatus", {
+      readyCount: room.players.filter(p => p.ready && !p.disconnected).length,
+      totalActive: activeCount,
+      allReady: activeReady && activeCount >= MIN_PLAYERS_TO_START
     });
-
-    if (room.status === "playing") {
-      const activeCount = room.players.filter(p => !p.disconnected).length;
-      const allRemainingSubmitted = room.players
-        .filter(p => !p.disconnected)
-        .every(p => room.submittedPlayers.has(p.id));
-
-      if (allRemainingSubmitted && activeCount > 0) {
-        endRound(roomCode);
-      }
-    }
-
-    if (room.status === "waiting") {
-      const activeReady = room.players.filter(p => !p.disconnected).every(p => p.ready);
-      const activeCount = room.players.filter(p => !p.disconnected).length;
-      if (activeReady && activeCount >= MIN_PLAYERS_TO_START) {
-        startGame(roomCode);
-      }
-    }
   }
 }
 
-// Cleanup zombie data periodically
+// Periodic cleanup (rate limiter pruning)
 setInterval(() => {
   const now = Date.now();
   rateLimiter.forEach((requests, socketId) => {
-    const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW);
-    if (recentRequests.length === 0) {
-      rateLimiter.delete(socketId);
-    } else {
-      rateLimiter.set(socketId, recentRequests);
-    }
+    const recent = requests.filter(t => now - t < RATE_LIMIT_WINDOW);
+    if (recent.length === 0) rateLimiter.delete(socketId);
+    else rateLimiter.set(socketId, recent);
   });
 }, 60000);
 
